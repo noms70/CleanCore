@@ -1,4 +1,4 @@
-# flutter_test_application_1
+# CleanCore
 
 A new Flutter project.
 
