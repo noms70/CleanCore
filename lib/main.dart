@@ -32,7 +32,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: AppCol.btnbacks),
         useMaterial3: true,
       ),
-      home: const AuthWrapper(), // This widget handles auth logic
+      home:  HomePage(), // This widget handles auth logic
     );
   }
 }
