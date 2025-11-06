@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cc/utils/colors.dart';
+import '../widgets/navbar.dart';
+import './settings_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -9,16 +12,66 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  late GoogleMapController mapController;
+
+  // Driver information
   String driverName = 'James Anderson';
   String currentStatus = 'Offline'; // Offline, On Route, Break
+
+  // Route data
   int completedBins = 12;
   int totalBins = 45;
   String routeId = 'Route 4B - Downtown';
   String estimatedTime = '2h 35m';
   int criticalBinsNearby = 3;
+
+  // Performance metrics
   double efficiencyScore = 87.5;
   double distanceSaved = 24.3; // km
   double capacityUsage = 68; // percentage
+
+  // Map markers and locations
+  final List<BinLocation> binLocations = [
+    BinLocation(
+      id: 'BIN_001',
+      lat: 40.7128,
+      lng: -74.0060,
+      fullness: 95,
+      isCritical: true,
+    ),
+    BinLocation(
+      id: 'BIN_002',
+      lat: 40.7150,
+      lng: -74.0050,
+      fullness: 45,
+      isCritical: false,
+    ),
+    BinLocation(
+      id: 'BIN_003',
+      lat: 40.7160,
+      lng: -74.0040,
+      fullness: 98,
+      isCritical: true,
+    ),
+    BinLocation(
+      id: 'BIN_004',
+      lat: 40.7140,
+      lng: -74.0070,
+      fullness: 35,
+      isCritical: false,
+    ),
+    BinLocation(
+      id: 'BIN_005',
+      lat: 40.7135,
+      lng: -74.0045,
+      fullness: 92,
+      isCritical: true,
+    ),
+  ];
+
+  Set<Marker> _markers = {};
+
+  // Alerts
   List<Alert> alerts = [
     Alert(
       title: 'New Bin Urgency Detected',
@@ -33,6 +86,44 @@ class _HomePageState extends State<HomePage> {
       icon: Icons.check_circle,
     ),
   ];
+
+  String currentPage = 'home';
+
+  @override
+  void initState() {
+    super.initState();
+    _generateMarkers();
+  }
+
+  void _generateMarkers() {
+    Set<Marker> markers = {};
+
+    for (var bin in binLocations) {
+      markers.add(
+        Marker(
+          markerId: MarkerId(bin.id),
+          position: LatLng(bin.lat, bin.lng),
+          icon: bin.isCritical
+              ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)
+              : BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueGreen,
+                ),
+          infoWindow: InfoWindow(
+            title: bin.id,
+            snippet: '${bin.fullness}% Full',
+          ),
+        ),
+      );
+    }
+
+    setState(() {
+      _markers = markers;
+    });
+  }
+
+  void _onMapCreated(GoogleMapController controller) {
+    mapController = controller;
+  }
 
   String getGreeting() {
     final hour = DateTime.now().hour;
@@ -58,6 +149,16 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (currentPage == 'settings') {
+      return SettingsPage(
+        onNavigate: (page) {
+          setState(() {
+            currentPage = page;
+          });
+        },
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('SmartEnds Driver Dashboard'),
@@ -68,17 +169,148 @@ class _HomePageState extends State<HomePage> {
       body: SingleChildScrollView(
         child: Column(
           children: [
+            // Welcome & Status Banner
             _buildWelcomeBanner(),
 
+            // Quick Start Button
             _buildQuickStartButton(),
 
+            // Google Maps Section - added interactive map with bin locations
+            _buildMapSection(),
+
+            // Route Summary
             _buildRouteSummary(),
 
+            // Alerts & Notifications
             _buildAlerts(),
 
+            // Performance Metrics KPIs
             _buildKPIs(),
 
             const SizedBox(height: 20),
+          ],
+        ),
+      ),
+      bottomNavigationBar: NavBar(
+        currentPage: currentPage,
+        onNavigate: (page) {
+          setState(() {
+            currentPage = page;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildMapSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppCol.btnbacks.withOpacity(0.2), width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            SizedBox(
+              height: 300,
+              child: GoogleMap(
+                onMapCreated: _onMapCreated,
+                initialCameraPosition: const CameraPosition(
+                  target: LatLng(40.7145, -74.0055),
+                  zoom: 15.5,
+                ),
+                markers: _markers,
+                myLocationButtonEnabled: true,
+                myLocationEnabled: true,
+                zoomControlsEnabled: false,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on,
+                        color: AppCol.btnbacks,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Route Map Overview',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppCol.btntext,
+                        ),
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '$criticalBinsNearby Critical',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Critical Bins (95%+)',
+                        style: TextStyle(fontSize: 11, color: AppCol.textGrey),
+                      ),
+                      const SizedBox(width: 20),
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Standard Bins',
+                        style: TextStyle(fontSize: 11, color: AppCol.textGrey),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -93,7 +325,7 @@ class _HomePageState extends State<HomePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${getGreeting()}, $driverName! 👋',
+            '${getGreeting()}, $driverName!',
             style: const TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -545,6 +777,22 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+}
+
+class BinLocation {
+  final String id;
+  final double lat;
+  final double lng;
+  final int fullness;
+  final bool isCritical;
+
+  BinLocation({
+    required this.id,
+    required this.lat,
+    required this.lng,
+    required this.fullness,
+    required this.isCritical,
+  });
 }
 
 class Alert {
