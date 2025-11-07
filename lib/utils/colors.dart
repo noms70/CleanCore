@@ -18,7 +18,7 @@ class AppCol {
   static const Color activeDot = Colors.blue;
   static const Color inactiveDot = Colors.grey;
   static const Color textGrey = Colors.grey;
-  static const Color btntext = Color(0xFF3D003E);
+  static const Color btntext = Color(0xFF0A0E27);
   static const Color ngt = Color(0xFF00D9D9); // normal green text
   static const Color btnbacks = Color(0xFF00D9D9); // button first color
   static const Color btnbacke = Color(0xFF0A0E27); // button second color

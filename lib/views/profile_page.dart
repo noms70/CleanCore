@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:cc/utils/appbar.dart';
+import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
