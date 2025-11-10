@@ -1,8 +1,11 @@
+import 'package:cc/widgets/kpi_card.dart';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cc/utils/colors.dart';
 import '../widgets/navbar.dart';
 import './settings_page.dart';
+import '../widgets/alert_card.dart';
+import './map_page.dart'; // <-- IMPORT NEW MAP PAGE
+import '../models/models.dart'; // <-- IMPORT NEW MODELS
 import 'dart:io';
 
 class HomePage extends StatefulWidget {
@@ -13,8 +16,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  late GoogleMapController mapController;
-
   // Driver information
   String driverName = 'James Anderson';
   String currentStatus = 'Offline'; // Offline, On Route, Break
@@ -32,6 +33,7 @@ class _HomePageState extends State<HomePage> {
   double capacityUsage = 68; // percentage
 
   // Map markers and locations
+  // THIS DATA IS STILL THE "SOURCE OF TRUTH"
   final List<BinLocation> binLocations = [
     BinLocation(
       id: 'BIN_001',
@@ -85,9 +87,7 @@ class _HomePageState extends State<HomePage> {
     ),
   ];
 
-  Set<Marker> _markers = {};
-  BinLocation? selectedBin;
-  Set<Polyline> _polylines = {};
+  // Map-related state is MOVED to MapPage
   double driverLat = 40.7145;
   double driverLng = -74.0055;
 
@@ -119,7 +119,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _generateMarkers();
+    // _generateMarkers(); // <-- MOVED TO MAP PAGE
     _initializeUserData();
   }
 
@@ -339,49 +339,15 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _generateMarkers() {
-    Set<Marker> markers = {};
-
-    for (var bin in binLocations) {
-      Color markerColor;
-      if (bin.isCritical) {
-        markerColor = Colors.red;
-      } else if (bin.fullness > 70) {
-        markerColor = Colors.yellow;
-      } else {
-        markerColor = Colors.green;
-      }
-
-      markers.add(
-        Marker(
-          markerId: MarkerId(bin.id),
-          position: LatLng(bin.lat, bin.lng),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            markerColor == Colors.red
-                ? BitmapDescriptor.hueRed
-                : markerColor == Colors.yellow
-                ? BitmapDescriptor.hueYellow
-                : BitmapDescriptor.hueGreen,
-          ),
-          infoWindow: InfoWindow(
-            title: bin.id,
-            snippet: '${bin.fullness}% Full - ${bin.area}',
-          ),
-          onTap: () {
-            _showBinDetails(bin);
-          },
-        ),
-      );
-    }
-
-    setState(() {
-      _markers = markers;
-    });
-  }
-
-  void _onMapCreated(GoogleMapController controller) {
-    mapController = controller;
-  }
+  // ALL MAP-RELATED METHODS ARE MOVED TO MAP_PAGE.DART
+  // _generateMarkers()
+  // _onMapCreated()
+  // _createRoute()
+  // _getBounds()
+  // _showBinDetails()
+  // _buildBinDetailsSheet()
+  // _buildDetailRow()
+  // _buildBinTile()
 
   String getGreeting() {
     final hour = DateTime.now().hour;
@@ -405,174 +371,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _createRoute(BinLocation bin) {
-    List<LatLng> routePoints = [
-      LatLng(driverLat, driverLng),
-      LatLng(bin.lat, bin.lng),
-    ];
-
-    setState(() {
-      _polylines = {
-        Polyline(
-          polylineId: const PolylineId('route_to_bin'),
-          points: routePoints,
-          color: AppCol.btnbacks,
-          width: 5,
-        ),
-      };
-    });
-
-    mapController.animateCamera(
-      CameraUpdate.newLatLngBounds(_getBounds(routePoints), 100),
-    );
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Route created to ${bin.id}'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  LatLngBounds _getBounds(List<LatLng> points) {
-    double minLat = points[0].latitude;
-    double maxLat = points[0].latitude;
-    double minLng = points[0].longitude;
-    double maxLng = points[0].longitude;
-
-    for (var point in points) {
-      minLat = point.latitude < minLat ? point.latitude : minLat;
-      maxLat = point.latitude > maxLat ? point.latitude : maxLat;
-      minLng = point.longitude < minLng ? point.longitude : minLng;
-      maxLng = point.longitude > maxLng ? point.longitude : maxLng;
-    }
-
-    return LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
-    );
-  }
-
-  void _showBinDetails(BinLocation bin) {
-    setState(() {
-      selectedBin = bin;
-    });
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _buildBinDetailsSheet(bin),
-    );
-  }
-
-  Widget _buildBinDetailsSheet(BinLocation bin) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text(
-                'Bin Details',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: AppCol.btntext,
-                ),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: const Icon(Icons.close, size: 28),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _buildDetailRow('ID', bin.id),
-          const SizedBox(height: 12),
-          _buildDetailRow('Area', bin.area),
-          const SizedBox(height: 12),
-          _buildDetailRow('Status', bin.status),
-          const SizedBox(height: 12),
-          _buildDetailRow('Fullness', '${bin.fullness}%'),
-          const SizedBox(height: 12),
-          _buildDetailRow('Capacity', '${bin.capacity}L'),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-              value: bin.fullness / 100,
-              minHeight: 8,
-              backgroundColor: AppCol.btnbacks.withOpacity(0.2),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                bin.isCritical ? Colors.red : AppCol.btnbacks,
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _createRoute(bin);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppCol.btnbacks,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: const Text(
-                'Create Route to Bin',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppCol.btnbacke,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: AppCol.textGrey,
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: AppCol.btntext,
-          ),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    // --- THIS IS NOW THE MAIN PAGE ROUTER ---
+
     if (currentPage == 'settings') {
       return SettingsPage(
         onNavigate: (page) {
@@ -583,30 +385,42 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
+    if (currentPage == 'Map') {
+      return MapPage(
+        binLocations: binLocations,
+        driverLat: driverLat,
+        driverLng: driverLng,
+        currentPage: currentPage,
+        onNavigate: (page) {
+          setState(() {
+            currentPage = page;
+          });
+        },
+      );
+    }
+
+    // --- ELSE, SHOW THE HOME PAGE ---
     final screenSize = MediaQuery.of(context).size;
 
     return Scaffold(
-      extendBody: true, // <-- ADD THIS LINE
+      extendBody: true,
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(40)),
+        ),
+        backgroundColor: AppCol.btnbacks,
         elevation: 0,
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // IconButton(
-            //   icon: const Icon(Icons.menu, color: Colors.black, size: 28),
-            //   onPressed: () {
-            //     // Hamburger menu action
-            //   },
-            // ),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(left: 50),
+                padding: const EdgeInsets.only(left: 50, bottom: 10),
                 child: Center(
                   child: Image.asset(
-                    'assets/cc_logo2.png',
-                    height: 55,
+                    'assets/cc_logo.png',
+                    height: 100,
                     fit: BoxFit.contain,
                   ),
                 ),
@@ -616,59 +430,9 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              _buildUserInfo(context, screenSize),
-              Expanded(
-                flex: 2,
-                child: GoogleMap(
-                  onMapCreated: _onMapCreated,
-                  initialCameraPosition: const CameraPosition(
-                    target: LatLng(40.7145, -74.0055),
-                    zoom: 15.5,
-                  ),
-                  markers: _markers,
-                  polylines: _polylines,
-                  myLocationButtonEnabled: true,
-                  myLocationEnabled: true,
-                  zoomControlsEnabled: false,
-                ),
-              ),
-              Container(
-                height: 140,
-                color: Colors.white,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  itemCount: binLocations.length,
-                  itemBuilder: (context, index) {
-                    final bin = binLocations[index];
-                    return _buildBinTile(bin);
-                  },
-                ),
-              ),
-              Expanded(
-                flex: 1,
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      _buildRouteSummary(),
-                      const SizedBox(height: 16),
-                      _buildKPIs(),
-                      const SizedBox(height: 20),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+      body: _buildHomePageContent(
+        screenSize,
+      ), // <-- USE NEW HOME CONTENT METHOD
       bottomNavigationBar: NavBar(
         currentPage: currentPage,
         onNavigate: (page) {
@@ -680,63 +444,32 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildBinTile(BinLocation bin) {
-    bool isSelected = selectedBin?.id == bin.id;
-    Color tileColor = bin.isCritical ? Colors.red : Colors.green;
-
-    return GestureDetector(
-      onTap: () => _showBinDetails(bin),
-      child: Container(
-        width: 110,
-        margin: const EdgeInsets.only(right: 10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? AppCol.btnbacks : tileColor.withOpacity(0.3),
-            width: isSelected ? 2 : 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+  // --- NEW METHOD TO BUILD JUST THE HOME PAGE'S CONTENT ---
+  Widget _buildHomePageContent(Size screenSize) {
+    return Stack(
+      children: [
+        Column(
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: tileColor.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.delete_outline, color: tileColor, size: 20),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              bin.id,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: AppCol.btntext,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${bin.fullness}%',
-              style: TextStyle(
-                fontSize: 11,
-                color: tileColor,
-                fontWeight: FontWeight.w600,
+            _buildUserInfo(context, screenSize),
+            // GoogleMap WIDGET REMOVED
+            // _buildBinTile ListView REMOVED
+            Expanded(
+              flex: 1,
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    _buildRouteSummary(),
+                    const SizedBox(height: 16),
+                    //_buildKPIs(), // <-- UNCOMMENTED
+                    const SizedBox(height: 20),
+                    _buildAlerts(), // <-- MOVED HERE FOR LAYOUT
+                  ],
+                ),
               ),
             ),
           ],
         ),
-      ),
+      ],
     );
   }
 
@@ -910,187 +643,39 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 12),
-          ...alerts.map((alert) => _buildAlertCard(alert)),
+          ...alerts.map((alert) => AlertCard(alert: alert)),
         ],
       ),
     );
   }
 
-  Widget _buildAlertCard(Alert alert) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: alert.type == 'success'
-            ? Colors.green.withOpacity(0.1)
-            : alert.type == 'warning'
-            ? Colors.orange.withOpacity(0.1)
-            : Colors.blue.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: alert.type == 'success'
-              ? Colors.green.withOpacity(0.3)
-              : alert.type == 'warning'
-              ? Colors.orange.withOpacity(0.3)
-              : Colors.blue.withOpacity(0.3),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            alert.icon,
-            color: alert.type == 'success'
-                ? Colors.green
-                : alert.type == 'warning'
-                ? Colors.orange
-                : Colors.blue,
-            size: 20,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  alert.title,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: AppCol.btntext,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  alert.message,
-                  style: const TextStyle(fontSize: 12, color: AppCol.textGrey),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildKPIs() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildKPICard(
-              'Efficiency',
-              '$efficiencyScore%',
-              Icons.trending_up,
-              Colors.green,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildKPICard(
-              'Capacity',
-              '$capacityUsage%',
-              Icons.local_shipping,
-              Colors.orange,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildKPICard(
-    String label,
-    String value,
-    IconData icon,
-    Color accentColor, {
-    bool isFullWidth = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accentColor.withOpacity(0.2), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: accentColor.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(icon, color: accentColor, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppCol.textGrey,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: AppCol.btntext,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class BinLocation {
-  final String id;
-  final double lat;
-  final double lng;
-  final int fullness;
-  final bool isCritical;
-  final String area;
-  final String status;
-  final int capacity;
-
-  BinLocation({
-    required this.id,
-    required this.lat,
-    required this.lng,
-    required this.fullness,
-    required this.isCritical,
-    required this.area,
-    required this.status,
-    required this.capacity,
-  });
-}
-
-class Alert {
-  final String title;
-  final String message;
-  final String type; // 'info', 'success', 'warning'
-  final IconData icon;
-
-  Alert({
-    required this.title,
-    required this.message,
-    required this.type,
-    required this.icon,
-  });
+  // // --- KPI WIDGETS ---
+  // Widget _buildKPIs() {
+  //   return Padding(
+  //     padding: const EdgeInsets.symmetric(horizontal: 20),
+  //     child: Row(
+  //       children: [
+  //         Expanded(
+  //           // Use the new widget
+  //           child: KpiCard(
+  //             label: 'Efficiency',
+  //             value: '$efficiencyScore%',
+  //             icon: Icons.trending_up,
+  //             accentColor: Colors.green,
+  //           ),
+  //         ),
+  //         const SizedBox(width: 12),
+  //         Expanded(
+  //           // Use the new widget
+  //           child: KpiCard(
+  //             label: 'Capacity',
+  //             value: '$capacityUsage%',
+  //             icon: Icons.local_shipping,
+  //             accentColor: Colors.orange,
+  //           ),
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  // }
 }

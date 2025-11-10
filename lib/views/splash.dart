@@ -77,8 +77,8 @@ class _SplashScreenState extends State<SplashScreen>
               FadeTransition(
                 opacity: _fadeAnimation!,
                 child: Image.asset(
-                  'assets/cc_logo2.png',
-                 // height: isPortrait ? screenHeight * 0.3 : screenHeight * 0.3,
+                  'assets/cc_logo.png',
+                  // height: isPortrait ? screenHeight * 0.3 : screenHeight * 0.3,
                   width: isPortrait ? screenWidth * 0.6 : screenWidth * 0.7,
                   fit: BoxFit.contain,
                 ),
@@ -94,6 +94,7 @@ class _SplashScreenState extends State<SplashScreen>
                     ? screenHeight * 0.017
                     : screenHeight * 0.03,
                 color: Colors.white,
+                fontWeight: FontWeight.bold, // Added this line for bold text
               ),
               textAlign: TextAlign.center,
             ),

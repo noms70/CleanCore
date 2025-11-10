@@ -2,8 +2,6 @@ import 'package:cc/utils/colors.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../utils/utils.dart' hide AppCol;
-
 class AppBuild {
   PreferredSizeWidget buildAppBar({
     required String title,
