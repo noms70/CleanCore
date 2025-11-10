@@ -87,7 +87,7 @@ class _SplashScreenState extends State<SplashScreen>
             const SizedBox(height: 10),
 
             Text(
-              'Eco-Friendly Solutions for you!',
+              'A Smartends Solution',
               style: TextStyle(
                 fontFamily: 'Montserrat',
                 fontSize: isPortrait

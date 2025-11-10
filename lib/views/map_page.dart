@@ -345,8 +345,8 @@ class _MapPageState extends State<MapPage> {
           GoogleMap(
             onMapCreated: _onMapCreated,
             initialCameraPosition: const CameraPosition(
-              target: LatLng(40.7145, -74.0055),
-              zoom: 15.5,
+              target: LatLng(33.6996, 73.0362),
+              zoom: 11.5,
             ),
             markers: _markers,
             polylines: _polylines,

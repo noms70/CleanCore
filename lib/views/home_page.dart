@@ -32,64 +32,67 @@ class _HomePageState extends State<HomePage> {
   double distanceSaved = 24.3; // km
   double capacityUsage = 68; // percentage
 
+  // --- MODIFICATION: NEW ISLAMABAD LOCATIONS ---
   // Map markers and locations
   // THIS DATA IS STILL THE "SOURCE OF TRUTH"
   final List<BinLocation> binLocations = [
     BinLocation(
-      id: 'BIN_001',
-      lat: 40.7128,
-      lng: -74.0060,
-      fullness: 95,
-      isCritical: true,
-      area: 'Downtown A',
-      status: 'Critical',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_002',
-      lat: 40.7150,
-      lng: -74.0050,
-      fullness: 45,
-      isCritical: false,
-      area: 'Downtown B',
-      status: 'Normal',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_003',
-      lat: 40.7160,
-      lng: -74.0040,
-      fullness: 98,
-      isCritical: true,
-      area: 'Downtown C',
-      status: 'Critical',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_004',
-      lat: 40.7140,
-      lng: -74.0070,
-      fullness: 35,
-      isCritical: false,
-      area: 'Downtown D',
-      status: 'Normal',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_005',
-      lat: 40.7135,
-      lng: -74.0045,
+      id: 'BIN_ISB_001',
+      lat: 33.72962, // Faisal Mosque
+      lng: 73.03702,
       fullness: 92,
       isCritical: true,
-      area: 'Downtown E',
+      area: 'Faisal Mosque Area',
+      status: 'Critical',
+      capacity: 240,
+    ),
+    BinLocation(
+      id: 'BIN_ISB_002',
+      lat: 33.69333, // Pakistan Monument
+      lng: 73.06822,
+      fullness: 45,
+      isCritical: false,
+      area: 'Pakistan Monument',
+      status: 'Normal',
+      capacity: 240,
+    ),
+    BinLocation(
+      id: 'BIN_ISB_003',
+      lat: 33.7400, // Daman-e-Koh
+      lng: 73.0600,
+      fullness: 98,
+      isCritical: true,
+      area: 'Daman-e-Koh Viewpoint',
+      status: 'Critical',
+      capacity: 240,
+    ),
+    BinLocation(
+      id: 'BIN_ISB_004',
+      lat: 33.7077, // Centaurus Mall
+      lng: 73.0499,
+      fullness: 35,
+      isCritical: false,
+      area: 'Centaurus Mall',
+      status: 'Normal',
+      capacity: 240,
+    ),
+    BinLocation(
+      id: 'BIN_ISB_005',
+      lat: 33.70293, // Rawal Lake
+      lng: 73.12771,
+      fullness: 88,
+      isCritical: true,
+      area: 'Rawal Lake Park',
       status: 'Critical',
       capacity: 240,
     ),
   ];
 
   // Map-related state is MOVED to MapPage
-  double driverLat = 40.7145;
-  double driverLng = -74.0055;
+  // --- MODIFICATION: NEW DRIVER STARTING LOCATION ---
+  double driverLat = 33.7077; // Centered at Centaurus
+  double driverLng = 73.0499;
+  // --- END MODIFICATION ---
 
   // Alerts
   List<Alert> alerts = [
