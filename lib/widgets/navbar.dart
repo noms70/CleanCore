@@ -6,58 +6,106 @@ class NavBar extends StatelessWidget {
   final Function(String) onNavigate;
 
   const NavBar({Key? key, required this.currentPage, required this.onNavigate})
-    : super(key: key);
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    // --- 1. RESPONSIVE LOGIC (Same as before) ---
+    final double screenWidth = MediaQuery.of(context).size.width;
+    const double maxNavBarWidth = 500.0;
+    const double mobileHorizontalPadding = 15.0;
+
+    double horizontalPadding;
+    if (screenWidth > (maxNavBarWidth + (mobileHorizontalPadding * 2))) {
+      horizontalPadding = (screenWidth - maxNavBarWidth) / 2;
+    } else {
+      horizontalPadding = mobileHorizontalPadding;
+    }
+    // --- END RESPONSIVE LOGIC ---
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 20.0, left: 15.0, right: 15.0),
+      padding: EdgeInsets.only(
+        bottom: 20.0,
+        left: horizontalPadding,
+        right: horizontalPadding,
+      ),
       child: ClipRRect(
-        // Suggestion: Simpler radius if all corners are the same
         borderRadius: BorderRadius.circular(40.0),
-        // borderRadius: const BorderRadius.only(
-        //   topLeft: Radius.circular(40.0),
-        //   topRight: Radius.circular(40.0),
-        //   bottomLeft: Radius.circular(40.0),
-        //   bottomRight: Radius.circular(40.0),
-        // ),
         child: Container(
+          // Give the nav bar a consistent height
+          height: 70.0, // You can adjust this height
           decoration: BoxDecoration(
             color: AppCol.btnbacks,
-            // ... (your commented-out styles)
           ),
-          child: BottomNavigationBar(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            // --- FIX 1 ---
-            currentIndex: currentPage == 'home'
-                ? 0
-                : currentPage == 'Map'
-                ? 1
-                : 2,
-            // --- END FIX 1 ---
-            selectedItemColor: AppCol.btnbacke,
-            unselectedItemColor: AppCol.btnbacke.withOpacity(0.4),
-            // --- FIX 2 ---
-            onTap: (index) {
-              if (index == 0) {
-                onNavigate('home');
-              } else if (index == 1) {
-                onNavigate('Map');
-              } else {
-                onNavigate('settings');
-              }
-            },
-            // --- END FIX 2 ---
-            items: const [
-              BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-              BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Map'),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.settings),
+          // --- 2. LABELS + CENTERING FIX ---
+          // Use a Row for horizontal layout
+          child: Row(
+            // Each item will be an 'Expanded' widget to take up equal space
+            children: [
+              _buildNavItem(
+                icon: Icons.home,
+                label: 'Home',
+                pageName: 'home',
+              ),
+              _buildNavItem(
+                icon: Icons.map,
+                label: 'Map',
+                pageName: 'Map',
+              ),
+              _buildNavItem(
+                icon: Icons.settings,
                 label: 'Settings',
+                pageName: 'settings',
               ),
             ],
           ),
+          // --- END FIX ---
+        ),
+      ),
+    );
+  }
+
+  // --- 3. HELPER WIDGET ---
+  // We create a helper function to build each nav item.
+  // This avoids repeating code.
+  Widget _buildNavItem({
+    required IconData icon,
+    required String label,
+    required String pageName,
+  }) {
+    // Check if this item is the currently selected one
+    final bool isSelected = (currentPage == pageName);
+
+    // Determine the color based on selection
+    final Color itemColor =
+        isSelected ? AppCol.btnbacke : AppCol.btnbacke.withOpacity(0.4);
+
+    // Expanded makes the widget fill 1/3 of the Row
+    return Expanded(
+      child: InkWell(
+        // Use InkWell for tap effect
+        onTap: () => onNavigate(pageName),
+        // Make the splash effect match the icon color
+        splashColor: AppCol.btnbacke.withOpacity(0.1),
+        highlightColor: AppCol.btnbacke.withOpacity(0.1),
+        child: Column(
+          // Center the icon and text vertically
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: itemColor,
+            ),
+            const SizedBox(height: 4), // Space between icon and label
+            Text(
+              label,
+              style: TextStyle(
+                color: itemColor,
+                fontSize: 12, // Standard label font size
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
         ),
       ),
     );

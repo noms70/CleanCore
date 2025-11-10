@@ -21,7 +21,12 @@ class _SettingsPageState extends State<SettingsPage> {
     final Size screenSize = MediaQuery.of(context).size;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: const Text(
+          'Settings',
+          style: TextStyle(
+            fontWeight: FontWeight.bold, // Added this line for bold text
+          ),
+        ),
         elevation: 0,
         backgroundColor: AppCol.btnbacks,
         foregroundColor: AppCol.btnbacke,

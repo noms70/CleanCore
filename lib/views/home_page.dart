@@ -17,7 +17,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   // Driver information
-  String driverName = 'James Anderson';
+  String driverName = 'Ayesha Noman';
   String currentStatus = 'Offline'; // Offline, On Route, Break
 
   // Route data
