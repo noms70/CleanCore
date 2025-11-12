@@ -24,7 +24,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'SmartEnds App',
+      title: 'Clean Core - A Smartends Solution',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: AppCol.btnbacks,
