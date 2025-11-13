@@ -6,8 +6,6 @@ import 'package:flutter/material.dart';
 // `flutterfire configure`
 import 'firebase_options.dart';
 
-// Note: AuthWrapper was moved to its own file: auth_wrapper.dart
-
 void main() async {
   // Ensure Flutter is initialized
   WidgetsFlutterBinding.ensureInitialized();
