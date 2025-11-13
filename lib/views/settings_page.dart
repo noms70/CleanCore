@@ -1,3 +1,4 @@
+import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
 import '../utils/colors.dart';
 import '../widgets/navbar.dart';
@@ -20,20 +21,13 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final Size screenSize = MediaQuery.of(context).size;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Settings',
-          style: TextStyle(
-            fontWeight: FontWeight.bold, // Added this line for bold text
-          ),
-        ),
-        elevation: 0,
-        backgroundColor: AppCol.btnbacks,
-        foregroundColor: AppCol.btnbacke,
+      appBar: AppBuild().buildAppBar(
+        title: 'Settings',
+        icon: Icons.settings,
       ),
       body: SafeArea(
         child: Container(
-          decoration: BoxDecoration(color: AppCol.btnbacks),
+          decoration: BoxDecoration(color: Color(0xFF141C40)),
           child: Column(
             children: [
               Expanded(

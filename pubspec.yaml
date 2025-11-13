@@ -20,11 +20,13 @@ dependencies:
   fluttertoast: ^9.0.0
   cloud_firestore: ^6.1.0
   image_picker:
+  http:
   geolocator:
   geocoding: 
   flutter_polyline_points: 
   google_sign_in: ^6.3.0
   google_maps_flutter: ^2.14.0
+  shimmer:
 
 dev_dependencies:
   flutter_test:

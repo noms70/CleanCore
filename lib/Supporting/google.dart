@@ -164,4 +164,13 @@ class AuthMethods {
       print("Error storing user data: $e");
     }
   }
+
+  Future<void> signOut() async {
+    try {
+      await _googleSignIn.signOut();
+      await _auth.signOut();
+    } catch (e) {
+      print("Error signing out: $e");
+    }
+  }
 }

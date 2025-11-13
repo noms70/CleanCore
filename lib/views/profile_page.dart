@@ -1,9 +1,14 @@
+import 'dart:convert';
 import 'dart:io';
+import 'package:cc/services/auth_service.dart';
+import 'package:cc/services/firestore_service.dart';
 import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shimmer/shimmer.dart';
 
 import 'package:cc/utils/colors.dart';
+import 'package:cc/models/user_model.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -13,13 +18,31 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  final Map<String, dynamic> _userData = {
-    'firstName': 'John',
-    'lastName': 'Doe',
-    'email': 'john.doe@example.com',
-    'phoneNumber': '+1 (555) 123-4567',
-    'profilePicture': null,
-  };
+  final AuthService _authService = AuthService();
+  final FirestoreService _firestoreService = FirestoreService();
+  UserModel? _user;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    // Simulate a network delay for the shimmer effect to be visible
+    await Future.delayed(const Duration(seconds: 2));
+    final currentUser = _authService.currentUser;
+    if (currentUser != null) {
+      final user = await _firestoreService.getUser(currentUser.uid);
+      if (mounted) {
+        setState(() {
+          _user = user;
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   String formatFieldName(String fieldName) {
     List<String> words = fieldName.split(' ');
@@ -59,14 +82,15 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Text("Cancel"),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               final newValue = controller.text.trim();
               if (newValue.isNotEmpty && newValue != currentValue) {
                 String formattedField = formatFieldName(field);
-                setState(() {
-                  _userData[formattedField] = newValue;
+                await _firestoreService.updateUser(_user!.uid, {
+                  formattedField: newValue,
                 });
                 showToast('Profile Updated', isError: false);
+                _loadUserData();
               }
               Navigator.pop(context);
             },
@@ -105,20 +129,16 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  @override
+ @override
   Widget build(BuildContext context) {
     final Size screenSize = MediaQuery.of(context).size;
-    final firstname = _capitalize(_userData['firstName'] ?? '');
-    final profilePicUrl = _userData['profilePicture'] as String?;
-    final initials = firstname.isNotEmpty ? firstname[0].toUpperCase() : '?';
 
     return Scaffold(
       appBar: AppBuild().buildAppBar(
         title: 'Personal Profile',
-        icon: Icons.directions_bike,
       ),
       body: Container(
-        decoration: BoxDecoration(color: AppCol.appbg),
+        decoration: BoxDecoration(color: Color(0xFF141C40)),
         child: Column(
           children: [
             Expanded(
@@ -126,147 +146,239 @@ class _ProfilePageState extends State<ProfilePage> {
                 width: screenSize.width,
                 decoration: BoxDecoration(
                   color: Color(0xFFFCF5FD),
-                  borderRadius: BorderRadius.only(topLeft: Radius.circular(35)),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(35),
+                  ),
                 ),
-                child: ListView(
-                  padding: EdgeInsets.all(screenSize.width * 0.05),
+                child: _isLoading
+                    ? _buildShimmerLayout(screenSize)
+                    : _buildProfileContent(screenSize),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShimmerLayout(Size screenSize) {
+    return Shimmer.fromColors(
+      baseColor: Colors.grey[300]!,
+      highlightColor: Colors.grey[100]!,
+      child: ListView(
+        padding: EdgeInsets.all(screenSize.width * 0.05),
+        children: [
+          Center(
+            child: CircleAvatar(
+              radius: 50,
+              backgroundColor: Colors.white,
+            ),
+          ),
+          SizedBox(height: 20),
+          _buildShimmerEditableTile(),
+          _buildShimmerEditableTile(),
+          _buildShimmerEditableTile(),
+          _buildShimmerEditableTile(),
+          Divider(
+            color: Colors.grey.withOpacity(0.4),
+            thickness: 1,
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16.0),
+            child: Container(
+              height: 24,
+              width: 200,
+              color: Colors.white,
+            ),
+          ),
+          _buildShimmerListTile(),
+          _buildShimmerListTile(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildShimmerEditableTile() {
+    return ListTile(
+      leading: CircleAvatar(backgroundColor: Colors.white, radius: 16),
+      title: Container(
+        height: 16,
+        width: 100,
+        margin: const EdgeInsets.only(bottom: 8.0),
+        color: Colors.white,
+      ),
+      subtitle: Container(
+        height: 14,
+        width: 200,
+        color: Colors.white,
+      ),
+      trailing: Icon(Icons.edit, color: Colors.white),
+    );
+  }
+
+  Widget _buildShimmerListTile() {
+    return ListTile(
+      leading: CircleAvatar(backgroundColor: Colors.white, radius: 16),
+      title: Container(
+        height: 16,
+        width: 150,
+        color: Colors.white,
+      ),
+      trailing: Icon(Icons.arrow_forward_ios, color: Colors.white),
+    );
+  }
+
+  Widget _buildProfileContent(Size screenSize) {
+    return ListView(
+      padding: EdgeInsets.all(screenSize.width * 0.05),
+      children: [
+        _buildProfilePicture(),
+        SizedBox(height: 20),
+        _buildEditableTile(
+          title: "First Name",
+          value: _user?.firstName ?? 'Unknown',
+          icon: Icons.person,
+          onEdit: () => _navigateToEdit(
+            "First Name",
+            _user?.firstName ?? 'Unknown',
+          ),
+        ),
+        _buildEditableTile(
+          title: "Last Name",
+          value: _user?.lastName ?? 'Unknown',
+          icon: Icons.person,
+          onEdit: () => _navigateToEdit(
+            "Last Name",
+            _user?.lastName ?? 'Unknown',
+          ),
+        ),
+        _buildEditableTile(
+          title: "Email",
+          value: _user?.email ?? 'Unknown',
+          icon: Icons.email,
+          onEdit: null,
+        ),
+        _buildEditableTile(
+          title: "Phone Number",
+          value: _user?.phoneNumber ?? 'Not set',
+          icon: Icons.phone,
+          onEdit: () => _navigateToEdit(
+            "Phone Number",
+            _user?.phoneNumber ?? '',
+          ),
+        ),
+        Divider(
+          color: Colors.grey.withOpacity(0.4),
+          thickness: 1,
+        ),
+        _buildSectionHeader("Account Management"),
+        _buildListTile(
+          icon: Icons.delete,
+          title: "Delete Account",
+          onTap: _showDeleteAccountDialog,
+        ),
+        _buildListTile(
+          icon: Icons.logout,
+          title: "Sign Out",
+          onTap: () async {
+            await _authService.signOut();
+            Navigator.of(
+              context,
+            ).pushReplacementNamed('/login');
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProfilePicture() {
+    final profilePic = _user?.profilePicture;
+    final initials = _user?.firstName.isNotEmpty == true
+        ? _user!.firstName[0].toUpperCase()
+        : '?';
+
+    ImageProvider? backgroundImage;
+    if (profilePic != null && profilePic.isNotEmpty) {
+      if (profilePic.startsWith('http')) {
+        backgroundImage = NetworkImage(profilePic);
+      } else {
+        try {
+          backgroundImage = MemoryImage(base64Url.decode(profilePic));
+        } catch (e) {
+          print("Error decoding base64 image: $e");
+          backgroundImage = null;
+        }
+      }
+    }
+
+    return Container(
+      width: 110,
+      height: 110,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: [Color(0xFF2AF297), Colors.tealAccent],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 10,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CircleAvatar(
+            radius: 50,
+            backgroundColor: Colors.grey[300],
+            backgroundImage: backgroundImage,
+            child: (backgroundImage == null)
+                ? Text(
+                    initials,
+                    style: const TextStyle(
+                      fontSize: 40,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  )
+                : null,
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: 110,
+              height: 55,
+              decoration: BoxDecoration(
+                color: Color(0x5F101010),
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(55),
+                ),
+              ),
+              child: InkWell(
+                onTap: _updateProfilePicture,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Container(
-                      width: 110,
-                      height: 110,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF2AF297), Colors.tealAccent],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 10,
-                            offset: Offset(0, 5),
-                          ),
-                        ],
+                    Icon(Icons.edit, color: Colors.black45, size: 20),
+                    const SizedBox(height: 4),
+                    Text(
+                      "Edit",
+                      style: TextStyle(
+                        color: Colors.black45,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
                       ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          CircleAvatar(
-                            radius: 50,
-                            backgroundColor: Colors.grey[300],
-                            backgroundImage:
-                                (profilePicUrl?.isNotEmpty ?? false)
-                                ? (profilePicUrl!.startsWith('http')
-                                      ? NetworkImage(profilePicUrl)
-                                      : FileImage(File(profilePicUrl))
-                                            as ImageProvider)
-                                : null,
-                            child: (profilePicUrl?.isEmpty ?? true)
-                                ? Text(
-                                    initials,
-                                    style: const TextStyle(
-                                      fontSize: 40,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  )
-                                : null,
-                          ),
-                          Align(
-                            alignment: Alignment.bottomCenter,
-                            child: Container(
-                              width: 110,
-                              height: 55,
-                              decoration: BoxDecoration(
-                                color: Color(0x5F101010),
-                                borderRadius: const BorderRadius.vertical(
-                                  bottom: Radius.circular(55),
-                                ),
-                              ),
-                              child: InkWell(
-                                onTap: _updateProfilePicture,
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.edit,
-                                      color: Colors.black45,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      "Edit",
-                                      style: TextStyle(
-                                        color: Colors.black45,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    _buildEditableTile(
-                      title: "First Name",
-                      value: _userData['firstName'] ?? 'Unknown',
-                      icon: Icons.person,
-                      onEdit: () => _navigateToEdit(
-                        "First Name",
-                        _userData['firstName'] ?? 'Unknown',
-                      ),
-                    ),
-                    _buildEditableTile(
-                      title: "Last Name",
-                      value: _userData['lastName'] ?? 'Unknown',
-                      icon: Icons.person,
-                      onEdit: () => _navigateToEdit(
-                        "Last Name",
-                        _userData['lastName'] ?? 'Unknown',
-                      ),
-                    ),
-                    _buildEditableTile(
-                      title: "Email",
-                      value: _userData['email'] ?? 'Unknown',
-                      icon: Icons.email,
-                      onEdit: null,
-                    ),
-                    _buildEditableTile(
-                      title: "Phone Number",
-                      value: _userData['phoneNumber'] ?? 'Unknown',
-                      icon: Icons.phone,
-                      onEdit: () => _navigateToEdit(
-                        "Phone Number",
-                        _userData['phoneNumber'] ?? 'Unknown',
-                      ),
-                    ),
-                    Divider(color: Colors.grey.withOpacity(0.4), thickness: 1),
-                    _buildSectionHeader("Account Management"),
-                    _buildListTile(
-                      icon: Icons.delete,
-                      title: "Delete Account",
-                      onTap: _showDeleteAccountDialog,
-                    ),
-                    _buildListTile(
-                      icon: Icons.logout,
-                      title: "Sign Out",
-                      onTap: () {
-                        showToast(
-                          'This is a UI-only preview. Sign out functionality coming soon.',
-                        );
-                      },
                     ),
                   ],
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -305,29 +417,16 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  String _capitalize(String input) {
-    if (input.isEmpty) return input;
-
-    return input
-        .split(' ')
-        .map(
-          (word) => word.isNotEmpty
-              ? '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}'
-              : '',
-        )
-        .join(' ');
-  }
-
   Future<void> _updateProfilePicture() async {
     try {
       final picker = ImagePicker();
       final pickedFile = await picker.pickImage(source: ImageSource.gallery);
 
       if (pickedFile != null) {
-        setState(() {
-          _userData['profilePicture'] = pickedFile.path;
-        });
+        final imageFile = File(pickedFile.path);
+        await _firestoreService.uploadProfilePicture(_user!.uid, imageFile);
         showToast('Profile picture updated successfully', isError: false);
+        _loadUserData();
       }
     } catch (e) {
       print('Failed to update profile picture: $e');

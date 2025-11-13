@@ -44,7 +44,7 @@ class AppBuild {
                         Padding(
                           padding: EdgeInsets.only(
                             left: paddingLeft,
-                            bottom: screenHeight * 0.02,
+                            bottom: screenHeight * 0.03,
                           ),
                           child: Text(
                             title,
@@ -58,7 +58,7 @@ class AppBuild {
                         ),
                         const Spacer(),
                         Padding(
-                          padding: EdgeInsets.only(right: screenWidth * 0.04),
+                          padding: EdgeInsets.only(right: screenWidth * 0.04, bottom: screenHeight * 0.015),
                           child: icon != null
                               ? Icon(
                                   icon,

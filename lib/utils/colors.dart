@@ -29,7 +29,7 @@ class AppCol {
   static const Color appbg = Colors.teal;
 
   static const LinearGradient headerback = LinearGradient(
-    colors: [Color(0xFFF5F0F8), Color(0xFFB9FBFB), Colors.teal],
+    colors: [Color(0xFFF5F0F8), AppCol.btnbacks, Color(0xFF141C40)],
     stops: [0.18, 0.5, 1],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,

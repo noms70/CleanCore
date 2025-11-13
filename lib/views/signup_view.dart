@@ -3,6 +3,8 @@ import 'package:cc/utils/colors.dart';
 import 'package:cc/widgets/custom_text_form_field.dart';
 import 'package:flutter/material.dart';
 import 'package:cc/utils/verification.dart';
+
+import 'home_page.dart';
 // import 'package:cc/homePage.dart'; // Assuming this file exists
 
 class SignupView extends StatefulWidget {
@@ -51,7 +53,7 @@ class _SignupViewState extends State<SignupView> {
     final password = _passwordController.text.trim();
     final firstName = _firstNameController.text.trim();
     final lastName = _lastNameController.text.trim();
-    // final phone = "$_selectedCountryCode${_phoneController.text.trim()}"; // Full phone number
+    // final phone = "_selectedCountryCode\${_phoneController.text.trim()}"; // Full phone number
 
     // --- DOMAIN RESTRICTION CHECK ---
     // This check is now also in the AuthService, but good to have on client-side
@@ -64,7 +66,7 @@ class _SignupViewState extends State<SignupView> {
     }
 
     final passwordRegex = RegExp(
-      r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$",
+      r"^(?=.*[A-Za-z])(?=.*\\d)(?=.*[@\$!%*?&])[A-Za-z\\d@\$!%*?&]{8,}\$",
     );
     if (!passwordRegex.hasMatch(password)) {
       showToast(
@@ -88,7 +90,14 @@ class _SignupViewState extends State<SignupView> {
     if (!mounted) return;
 
     if (result == null) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const HomePage(),
+        ), // Make sure HomePage is imported
+      );
       // Success - email verification sent. Navigate to verification page.
+      /*
       final isVerified =
           await Navigator.push(
             context,
@@ -114,6 +123,7 @@ class _SignupViewState extends State<SignupView> {
       } else {
         showToast("Verification failed or cancelled.", isError: true);
       }
+      */
     } else {
       // Failure
       showToast(result, isError: true);
@@ -163,7 +173,7 @@ class _SignupViewState extends State<SignupView> {
         if (value == null || value.isEmpty) {
           return 'Please enter your name';
         }
-        if (!RegExp(r"^[a-zA-Z+_.-]+$").hasMatch(value)) {
+        if (!RegExp(r"^[a-zA-Z+_.-]+\$").hasMatch(value)) {
           return 'Enter a valid Name!';
         }
         return null;
@@ -181,7 +191,7 @@ class _SignupViewState extends State<SignupView> {
         if (value == null || value.isEmpty) {
           return 'Please enter your name';
         }
-        if (!RegExp(r"^[a-zA-Z+_.-]+$").hasMatch(value)) {
+        if (!RegExp(r"^[a-zA-Z+_.-]+\$").hasMatch(value)) {
           return 'Enter a valid Name!';
         }
         return null;
@@ -199,7 +209,7 @@ class _SignupViewState extends State<SignupView> {
         if (value == null || value.isEmpty) {
           return 'Please enter your email address';
         }
-        if (!RegExp(r"^[a-zA-Z0-9+_.-]+@[a-zA-Z0-9.-]+$").hasMatch(value)) {
+        if (!RegExp(r"^[a-zA-Z0-9+_.-]+@[a-zA-Z0-9.-]+\$").hasMatch(value)) {
           return 'Enter a valid email address!';
         }
         return null;
@@ -318,7 +328,7 @@ class _SignupViewState extends State<SignupView> {
   //               if (value == null || value.isEmpty) {
   //                 return 'Please enter your phone number';
   //               }
-  //               if (!RegExp(r"^\d{10,15}$").hasMatch(value)) {
+  //               if (!RegExp(r"^\\d{10,15}\$").hasMatch(value)) {
   //                 return 'Enter a valid phone number!';
   //               }
   //               return null;

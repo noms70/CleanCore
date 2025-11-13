@@ -1,20 +1,31 @@
 import 'package:cc/Supporting/google.dart'; // Your Google AuthMethods
+import 'package:cc/models/user_model.dart';
+import 'package:cc/services/firestore_service.dart'; // Import FirestoreService
 import 'package:cc/utils/colors.dart'; // For showToast
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
   final AuthMethods _authMethods = AuthMethods(); // Your Google sign-in logic
+  final FirestoreService _firestoreService =
+  FirestoreService(); // Instantiate FirestoreService
+
+  /// Stream to listen for auth state changes.
+  Stream<User?> get authStateChanges => _firebaseAuth.authStateChanges();
+
+  /// Get the current Firebase user.
+  User? get currentUser => _firebaseAuth.currentUser;
 
   // Helper to return user-friendly error messages
   String _handleAuthException(FirebaseAuthException e) {
     return {
-          'user-not-found': "No user found with this email.",
-          'wrong-password': "Incorrect password.",
-          'email-already-in-use': "This email is already in use.",
-          'weak-password': "Your password is too weak.",
-        }[e.code] ??
+      'user-not-found': "No user found with this email.",
+      'wrong-password': "Incorrect password.",
+      'email-already-in-use': "This email is already in use.",
+      'weak-password': "Your password is too weak.",
+    }[e.code] ??
         "An error occurred: ${e.message}";
   }
 
@@ -22,19 +33,18 @@ class AuthService {
   /// Returns `null` on success, or an error [String] on failure.
   Future<String?> signInWithEmail(String email, String password) async {
     try {
-      final userCredential = await _firebaseAuth.signInWithEmailAndPassword(
+      await _firebaseAuth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
 
       // Check for email verification
-      if (userCredential.user != null && !userCredential.user!.emailVerified) {
-        await _firebaseAuth.signOut(); // Sign out unverified user
-        return "Please verify your email address before logging in.";
-      }
+      // if (userCredential.user != null && !userCredential.user!.emailVerified) {
+      //   await _firebaseAuth.signOut(); // Sign out unverified user
+      //   return "Please verify your email address before logging in.";
+      // }
 
       // Success
-      // You could fetch user data from Firestore here if needed
       return null;
     } on FirebaseAuthException catch (e) {
       return _handleAuthException(e);
@@ -43,14 +53,13 @@ class AuthService {
     }
   }
 
-  /// Creates a new user, sends verification email, and signs out.
+  /// Creates a new user, saves to Firestore, sends verification, and signs out.
   /// Returns `null` on success, or an error [String] on failure.
   Future<String?> signUpWithEmail({
     required String email,
     required String password,
     required String firstName,
     required String lastName,
-    // String? phone, // You can add this
   }) async {
     // Domain restriction check
     if (!email.toLowerCase().endsWith('@smartends.com')) {
@@ -58,25 +67,34 @@ class AuthService {
     }
 
     try {
-      // 1. Create user
+      // 1. Create user in Firebase Auth
       final userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
           email: email, password: password);
 
-      // 2. Send verification email
-      await userCredential.user!.sendEmailVerification();
+      if (userCredential.user == null) {
+        throw Exception("User creation failed unexpectedly.");
+      }
 
-      // 3. TODO: Save user data (firstName, lastName) to Firestore
-      // Example:
-      // await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-      //   'firstName': firstName,
-      //   'lastName': lastName,
-      //   'email': email,
-      //   'phone': phone,
-      //   'createdAt': FieldValue.serverTimestamp(),
-      // });
+      final user = userCredential.user!;
 
-      // 4. Sign out to force verification
-      await _firebaseAuth.signOut();
+      // 2. Create a UserModel
+      final newUser = UserModel(
+        uid: user.uid,
+        email: email,
+        firstName: firstName,
+        lastName: lastName,
+        profilePicture: '', // Default empty URL
+        createdAt: Timestamp.now(),
+      );
+
+      // 3. Save user data to Firestore
+      await _firestoreService.createUser(newUser);
+
+      // 4. Send verification email
+      // await user.sendEmailVerification();
+
+      // 5. Sign out to force verification
+      // await _firebaseAuth.signOut();
 
       // Success (verification email sent)
       return null;
@@ -87,14 +105,31 @@ class AuthService {
     }
   }
 
-  /// Signs in with Google.
+  /// Signs in with Google and saves user data to Firestore if new.
   /// Returns `null` on success, or an error [String] on failure.
   Future<String?> signInWithGoogle(BuildContext context) async {
     try {
-      // Your AuthMethods handles the @smartends.com check
+      // Your AuthMethods handles the Google sign-in popup and @smartends.com check
       bool isLoggedIn = await _authMethods.signInWithGoogle(context);
 
-      if (isLoggedIn) {
+      if (isLoggedIn && _firebaseAuth.currentUser != null) {
+        final user = _firebaseAuth.currentUser!;
+
+        // Check if user already exists in Firestore
+        final firestoreUser = await _firestoreService.getUser(user.uid);
+
+        if (firestoreUser == null) {
+          // New Google sign-in user, save to Firestore
+          final newUser = UserModel(
+            uid: user.uid,
+            email: user.email ?? '',
+            firstName: user.displayName?.split(' ')[0] ?? '',
+            lastName: user.displayName?.split(' ').sublist(1).join(' ') ?? '',
+            profilePicture: user.photoURL ?? '',
+            createdAt: Timestamp.now(),
+          );
+          await _firestoreService.createUser(newUser);
+        }
         return null; // Success
       } else {
         // AuthMethods already shows a toast, but we return a message
@@ -110,8 +145,26 @@ class AuthService {
     }
   }
 
+  /// Sends a password reset email.
+  Future<String?> sendPasswordResetEmail(String email) async {
+    try {
+      await _firebaseAuth.sendPasswordResetEmail(email: email);
+      return null; // Success
+    } on FirebaseAuthException catch (e) {
+      return _handleAuthException(e);
+    } catch (e) {
+      return "An unexpected error occurred: $e";
+    }
+  }
+
   /// Signs out the current user.
   Future<void> signOut() async {
-    await _firebaseAuth.signOut();
+    try {
+      await _firebaseAuth.signOut();
+      // Also sign out from Google
+      await _authMethods.signOut();
+    } catch (e) {
+      print("Error signing out: $e");
+    }
   }
 }

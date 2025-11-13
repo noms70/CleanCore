@@ -1,3 +1,5 @@
+import 'package:cc/services/auth_service.dart';
+import 'package:cc/services/firestore_service.dart';
 import 'package:cc/widgets/kpi_card.dart';
 import 'package:flutter/material.dart';
 import 'package:cc/utils/colors.dart';
@@ -7,6 +9,9 @@ import '../widgets/alert_card.dart';
 import './map_page.dart'; // <-- IMPORT NEW MAP PAGE
 import '../models/models.dart'; // <-- IMPORT NEW MODELS
 import 'dart:io';
+import 'dart:convert';
+
+import 'package:cc/models/user_model.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -16,6 +21,10 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  final AuthService _authService = AuthService();
+  final FirestoreService _firestoreService = FirestoreService();
+  UserModel? _user;
+
   // Driver information
   String driverName = 'Ayesha Noman';
   String currentStatus = 'Offline'; // Offline, On Route, Break
@@ -114,7 +123,6 @@ class _HomePageState extends State<HomePage> {
 
   // User data variables for user info widget
   bool _isLoadingUserData = true;
-  Map<String, dynamic>? _cachedUserData;
   late List<Color> _gradientColors;
   late IconData _sunIcon;
   late String _greeting;
@@ -122,25 +130,21 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // _generateMarkers(); // <-- MOVED TO MAP PAGE
     _initializeUserData();
   }
 
-  void _initializeUserData() {
-    // Simulate loading user data (replace with actual data fetch)
-    Future.delayed(const Duration(milliseconds: 500), () {
+  void _initializeUserData() async {
+    final currentUser = _authService.currentUser;
+    if (currentUser != null) {
+      final user = await _firestoreService.getUser(currentUser.uid);
       if (mounted) {
         setState(() {
-          _cachedUserData = {
-            'firstName': 'James',
-            'lastName': 'Anderson',
-            'profilePicture': '', // Empty for now, can be populated later
-          };
+          _user = user;
           _isLoadingUserData = false;
           _updateGreeting();
         });
       }
-    });
+    }
   }
 
   void _updateGreeting() {
@@ -166,16 +170,27 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildUserInfo(BuildContext context, Size screenSize) {
-    if (_isLoadingUserData && _cachedUserData == null) {
+    if (_isLoadingUserData || _user == null) {
       return _buildUserInfoSkeleton(screenSize);
     }
 
-    final userData = _cachedUserData ?? {};
-    final firstName = _capitalize(
-      userData['firstName'] ?? userData['name'] ?? '',
-    );
-    final lastName = _capitalize(userData['lastName'] ?? '');
-    final profilePicUrl = userData['profilePicture'] as String? ?? '';
+    final firstName = _capitalize(_user!.firstName);
+    final lastName = _capitalize(_user!.lastName);
+    final profilePic = _user!.profilePicture;
+
+    ImageProvider? backgroundImage;
+    if (profilePic.isNotEmpty) {
+      if (profilePic.startsWith('http')) {
+        backgroundImage = NetworkImage(profilePic);
+      } else {
+        try {
+          backgroundImage = MemoryImage(base64Url.decode(profilePic));
+        } catch (e) {
+          print("Error decoding base64 image: $e");
+          backgroundImage = null;
+        }
+      }
+    }
 
     return Container(
       margin: EdgeInsets.symmetric(
@@ -196,66 +211,19 @@ class _HomePageState extends State<HomePage> {
       ),
       child: Row(
         children: [
-          Container(
-            width: screenSize.width * 0.13,
-            height: screenSize.width * 0.13,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFFF6F8F7), width: 3.0),
-            ),
-            child: profilePicUrl.isNotEmpty
-                ? (profilePicUrl.startsWith('http')
-                      ? ClipOval(
-                          child: Image.network(
-                            profilePicUrl,
-                            fit: BoxFit.cover,
-                            cacheWidth: (screenSize.width * 0.16).round(),
-                            cacheHeight: (screenSize.width * 0.16).round(),
-                            errorBuilder: (context, error, stackTrace) {
-                              return CircleAvatar(
-                                backgroundColor: const Color(0xFF8DB930),
-                                child: Text(
-                                  firstName.isNotEmpty ? firstName[0] : '?',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: screenSize.width * 0.04,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        )
-                      : ClipOval(
-                          child: Image.file(
-                            File(profilePicUrl),
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              return CircleAvatar(
-                                backgroundColor: AppCol.btnbacks,
-                                child: Text(
-                                  firstName.isNotEmpty ? firstName[0] : '?',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: screenSize.width * 0.04,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ))
-                : CircleAvatar(
-                    backgroundColor: AppCol.btnbacks,
-                    child: Text(
-                      firstName.isNotEmpty ? firstName[0] : '?',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: screenSize.width * 0.04,
-                        fontWeight: FontWeight.bold,
-                      ),
+          CircleAvatar(
+            radius: screenSize.width * 0.065,
+            backgroundImage: backgroundImage,
+            child: (backgroundImage == null)
+                ? Text(
+                    firstName.isNotEmpty ? firstName[0] : '?',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: screenSize.width * 0.04,
+                      fontWeight: FontWeight.bold,
                     ),
-                  ),
+                  )
+                : null,
           ),
           SizedBox(width: screenSize.width * 0.04),
           Expanded(
@@ -341,16 +309,6 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-
-  // ALL MAP-RELATED METHODS ARE MOVED TO MAP_PAGE.DART
-  // _generateMarkers()
-  // _onMapCreated()
-  // _createRoute()
-  // _getBounds()
-  // _showBinDetails()
-  // _buildBinDetailsSheet()
-  // _buildDetailRow()
-  // _buildBinTile()
 
   String getGreeting() {
     final hour = DateTime.now().hour;
@@ -651,34 +609,4 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-
-  // // --- KPI WIDGETS ---
-  // Widget _buildKPIs() {
-  //   return Padding(
-  //     padding: const EdgeInsets.symmetric(horizontal: 20),
-  //     child: Row(
-  //       children: [
-  //         Expanded(
-  //           // Use the new widget
-  //           child: KpiCard(
-  //             label: 'Efficiency',
-  //             value: '$efficiencyScore%',
-  //             icon: Icons.trending_up,
-  //             accentColor: Colors.green,
-  //           ),
-  //         ),
-  //         const SizedBox(width: 12),
-  //         Expanded(
-  //           // Use the new widget
-  //           child: KpiCard(
-  //             label: 'Capacity',
-  //             value: '$capacityUsage%',
-  //             icon: Icons.local_shipping,
-  //             accentColor: Colors.orange,
-  //           ),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
 }

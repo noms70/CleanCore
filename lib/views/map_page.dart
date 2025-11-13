@@ -1,13 +1,13 @@
+import 'dart:convert';
+import 'package:cc/widgets/appbar.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:cc/utils/colors.dart';
 import '../widgets/navbar.dart';
 import '../models/models.dart';
-
-// --- NEW IMPORTS ---
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
-// --- END NEW IMPORTS ---
 
 class MapPage extends StatefulWidget {
   final String currentPage;
@@ -42,16 +42,12 @@ class _MapPageState extends State<MapPage> {
 
   late PolylinePoints _polylinePoints;
 
-  // 🚨 REMINDER: Use your NEW, secured API key here.
-  // DO NOT SHARE THIS KEY PUBLICLY.
-  final String _googleApiKey = "AIzaSyBzGVNtpx96mevl5hXFpx7n-ZeAeM3u1k8";
-
   @override
   void initState() {
     super.initState();
-
-    _polylinePoints = PolylinePoints(apiKey: _googleApiKey);
-
+    _polylinePoints = PolylinePoints(
+      apiKey: "AIzaSyBzGVNtpx96mevl5hXFpx7n-ZeAeM3u1k8",
+    ); // No API key needed
     _setupMap();
   }
 
@@ -139,10 +135,9 @@ class _MapPageState extends State<MapPage> {
     _mapController = controller;
   }
 
-  // ✅ FIXED: Compatible with latest flutter_polyline_points API
+  // ✅ NEW: Alternative _createRoute function using OSRM
   void _createRoute(BinLocation bin) async {
     LatLng origin;
-    // Use current GPS location if available, otherwise fallback to driverLat/Lng
     if (_currentPosition != null) {
       origin = LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
     } else {
@@ -151,26 +146,38 @@ class _MapPageState extends State<MapPage> {
 
     LatLng destination = LatLng(bin.lat, bin.lng);
 
-    // ✅ New API format using PolylineRequest
-    final request = PolylineRequest(
-      origin: PointLatLng(origin.latitude, origin.longitude),
-
-      destination: PointLatLng(destination.latitude, destination.longitude),
-
-      mode: TravelMode.driving,
-    );
-    final result = await _polylinePoints.getRouteBetweenCoordinates(
-      request: request,
-    );
+    // OSRM API URL
+    // Format: http://router.project-osrm.org/route/v1/driving/{lng1},{lat1};{lng2},{lat2}?overview=full&geometries=polyline
+    String url =
+        'http://router.project-osrm.org/route/v1/driving/'
+        '${origin.longitude},${origin.latitude};'
+        '${destination.longitude},${destination.latitude}'
+        '?overview=full&geometries=polyline';
 
     List<LatLng> polylineCoordinates = [];
-    if (result.points.isNotEmpty) {
-      for (var point in result.points) {
-        polylineCoordinates.add(LatLng(point.latitude, point.longitude));
+
+    try {
+      var response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        var data = json.decode(response.body);
+        String encodedPolyline = data['routes'][0]['geometry'];
+
+        // Use the flutter_polyline_points package just to decode the string
+        List<PointLatLng> decodedPoints = PolylinePoints.decodePolyline(
+          encodedPolyline,
+        );
+        polylineCoordinates = decodedPoints
+            .map((point) => LatLng(point.latitude, point.longitude))
+            .toList();
+      } else {
+        print("Error with OSRM API: ${response.statusCode}");
       }
-    } else {
-      print("Error getting polyline: ${result.errorMessage}");
-      // Fallback: draw straight line if API fails
+    } catch (e) {
+      print("Error fetching route from OSRM: $e");
+    }
+
+    // Fallback to straight line if API call fails
+    if (polylineCoordinates.isEmpty) {
       polylineCoordinates = [origin, destination];
     }
 
@@ -401,91 +408,61 @@ class _MapPageState extends State<MapPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       extendBody: true,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(40)),
-        ),
-        backgroundColor: AppCol.btnbacks,
-        elevation: 0,
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 50, bottom: 10),
-                child: Center(
-                  child: Image.asset(
-                    'assets/cc_logo.png',
-                    height: 100,
-                    fit: BoxFit.contain,
+      body: _isLoading
+          ? const Center(
+        child: CircularProgressIndicator(color: AppCol.btnbacks),
+      )
+          : _initialPosition == null
+          ? const Center(
+        child: Text("Error: Could not load map. Location disabled?"),
+      )
+          : Stack(
+        children: [
+          GoogleMap(
+            onMapCreated: _onMapCreated,
+            initialCameraPosition: _initialPosition!,
+            markers: _markers,
+            polylines: _polylines,
+            myLocationButtonEnabled: false,
+            myLocationEnabled: true,
+            zoomControlsEnabled: false,
+            padding: const EdgeInsets.only(bottom: 10.0),
+          ),
+          Positioned(
+            right: 16,
+            bottom: 250, // Position above the bin list
+            child: FloatingActionButton(
+              heroTag: 'recenter_btn',
+              onPressed: _recenterMap,
+              backgroundColor: Colors.white,
+              mini: true,
+              // Smaller button
+              child: const Icon(Icons.my_location, color: AppCol.btntext),
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 90.0),
+              child: SizedBox(
+                height: 140,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
                   ),
+                  itemCount: widget.binLocations.length,
+                  itemBuilder: (context, index) {
+                    final bin = widget.binLocations[index];
+                    return _buildBinTile(bin);
+                  },
                 ),
               ),
             ),
-            const SizedBox(width: 48),
-          ],
-        ),
+          ),
+        ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: AppCol.btnbacks),
-            )
-          : _initialPosition == null
-          ? const Center(
-              child: Text("Error: Could not load map. Location disabled?"),
-            )
-          : Stack(
-              children: [
-                GoogleMap(
-                  onMapCreated: _onMapCreated,
-                  initialCameraPosition: _initialPosition!,
-                  markers: _markers,
-                  polylines: _polylines,
-                  myLocationButtonEnabled: true,
-                  myLocationEnabled: true,
-                  zoomControlsEnabled: false,
-                  // Padding to push Google's UI buttons up above our bin list
-                  padding: const EdgeInsets.only(bottom: 10.0),
-                ),
-
-                // --- CUSTOM RE-CENTER BUTTON ---
-                Positioned(
-                  right: 16,
-                  bottom: 250, // Position above the bin list
-                  child: FloatingActionButton(
-                    heroTag: 'recenter_btn',
-                    onPressed: _recenterMap,
-                    backgroundColor: Colors.white,
-                    mini: true, // Smaller button
-                    child: const Icon(Icons.my_location, color: AppCol.btntext),
-                  ),
-                ),
-
-                // -------------------------------
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 90.0),
-                    child: SizedBox(
-                      height: 140,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 12,
-                        ),
-                        itemCount: widget.binLocations.length,
-                        itemBuilder: (context, index) {
-                          final bin = widget.binLocations[index];
-                          return _buildBinTile(bin);
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
       bottomNavigationBar: NavBar(
         currentPage: widget.currentPage,
         onNavigate: widget.onNavigate,
@@ -518,4 +495,4 @@ class _MapPageState extends State<MapPage> {
 
     return await Geolocator.getCurrentPosition();
   }
-} 
+}

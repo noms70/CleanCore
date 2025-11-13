@@ -4,6 +4,8 @@ import 'package:cc/widgets/custom_text_form_field.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cc/utils/forgot_Pass.dart';
+
+import 'home_page.dart';
 // import 'package:cc/homePage.dart'; // Assuming this file exists
 
 class LoginView extends StatefulWidget {
@@ -75,10 +77,10 @@ class _LoginViewState extends State<LoginView> {
       // Success
       _saveCredentials();
       showToast("Welcome back!");
-      // Navigator.pushReplacement(
-      //   context,
-      //   MaterialPageRoute(builder: (context) => const HomePage()),
-      // );
+       Navigator.pushReplacement(
+         context,
+         MaterialPageRoute(builder: (context) => const HomePage()),
+       );
     } else {
       // Failure
       showToast(result, isError: true);
@@ -97,10 +99,10 @@ class _LoginViewState extends State<LoginView> {
     if (result == null) {
       // Success
       showToast('Successfully logged in with Google.');
-      // Navigator.pushReplacement(
-      //   context,
-      //   MaterialPageRoute(builder: (context) => const HomePage()),
-      // );
+       Navigator.pushReplacement(
+         context,
+         MaterialPageRoute(builder: (context) => const HomePage()),
+       );
     } else {
       // Failure
       // Toast is already shown by AuthMethods, but we can show a generic one
