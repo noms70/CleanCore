@@ -102,33 +102,91 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  void _showDeleteAccountDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Delete Account"),
-        content: Text(
-          "Are you sure you want to delete your account? This action cannot be undone.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("Cancel"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
-              showToast(
-                'This is a UI-only preview. Delete functionality coming soon.',
-              );
-              Navigator.pop(context);
-            },
-            child: Text("Delete"),
-          ),
-        ],
+// In lib/views/profile_page.dart
+
+// In lib/views/profile_page.dart
+
+void _showDeleteAccountDialog() {
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text("Delete Account"),
+      content: const Text(
+        "Are you sure you want to delete your account? This action cannot be undone. "
+        "All your data will be permanently deleted.",
       ),
-    );
-  }
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("Cancel"),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () async {
+            // 1. Close the AlertDialog immediately
+            Navigator.pop(context); 
+
+            if (_user == null || _user!.uid.isEmpty) {
+              showToast('Error: User not found.', isError: true);
+              return;
+            }
+
+            final uid = _user!.uid;
+
+            try {
+              // 2. Delete Firestore Data
+              await _firestoreService.deleteUserDocument(uid);
+              
+              // 3. Delete the Auth User (Requires recent login, handles token revocation)
+              final authError = await _authService.deleteAccount();
+
+              if (!mounted) return;
+
+              if (authError != null) {
+                // AUTH FAILED: If the error is 'requires-recent-login', show the error
+                showToast(authError, isError: true);
+                
+                // Sign out to force the user to re-authenticate if they want to try again
+                await _authService.signOut();
+                
+                // Use a stable navigation method after sign out
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (context) => AuthLandingScreen()),
+                      (Route<dynamic> route) => false,
+                    );
+                  }
+                });
+
+              } else {
+                // AUTH SUCCEEDED: Both Auth record and Firestore data are gone.
+                showToast('Your account has been successfully deleted.');
+                
+                // CRITICAL FIX: Use addPostFrameCallback to ensure navigation 
+                // runs *after* the current frame renders the success message.
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (context) => AuthLandingScreen()),
+                      (Route<dynamic> route) => false,
+                    );
+                  }
+                });
+              }
+            } catch (e) {
+              // Catch any unexpected general errors (network, permissions, etc.)
+              if (!mounted) return;
+              showToast('Account deletion failed due to an unexpected error. Please try again.', isError: true);
+              print('Full Deletion Error: $e');
+            }
+          },
+          child: const Text("Delete"),
+        ),
+      ],
+    ),
+  );
+}
 
  @override
   Widget build(BuildContext context) {
