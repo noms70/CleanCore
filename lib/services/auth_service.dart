@@ -167,4 +167,34 @@ class AuthService {
       print("Error signing out: $e");
     }
   }
+
+  // Inside the AuthService class
+
+/// Deletes the currently signed-in Firebase user account.
+/// Returns null on success, or an error String on failure.
+Future<String?> deleteAccount() async {
+  final user = _firebaseAuth.currentUser;
+  if (user == null) {
+    return "No active user found to delete.";
+  }
+
+  try {
+    // Attempt to delete the user from Firebase Authentication
+    await user.delete();
+    
+    // Note: The Firestore document deletion must be handled *before* // or simultaneously with this method call in the ProfilePage UI logic.
+    
+    return null; // Success
+  } on FirebaseAuthException catch (e) {
+    if (e.code == 'requires-recent-login') {
+      // This is the most common error: the user's login session is too old.
+      // Firebase requires re-authentication before account deletion.
+      return 'Security Error: Please sign out and sign in again to confirm account deletion.';
+    }
+    // Handle other authentication errors
+    return _handleAuthException(e);
+  } catch (e) {
+    return 'An unexpected error occurred during account deletion.';
+  }
+}
 }

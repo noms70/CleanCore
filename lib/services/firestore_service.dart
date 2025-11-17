@@ -64,4 +64,13 @@ class FirestoreService {
       throw Exception("Failed to upload image.");
     }
   }
+
+  Future<void> deleteUserDocument(String uid) async {
+  try {
+    await _usersCollection.doc(uid).delete();
+  } catch (e) {
+    print("Error deleting user document: $e");
+    throw Exception("Failed to delete user data.");
+  }
+}
 }
