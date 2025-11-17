@@ -6,6 +6,7 @@ import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:cc/views/auth/auth_landing_screen.dart';
 
 import 'package:cc/utils/colors.dart';
 import 'package:cc/models/user_model.dart';
@@ -281,10 +282,17 @@ class _ProfilePageState extends State<ProfilePage> {
           icon: Icons.logout,
           title: "Sign Out",
           onTap: () async {
-            await _authService.signOut();
-            Navigator.of(
-              context,
-            ).pushReplacementNamed('/login');
+          // 1. Sign out the user
+          await _authService.signOut();
+    
+            if (!mounted) return;
+      
+            // 2. Navigate to the AuthLandingScreen and clear all previous history.
+            Navigator.of(context).pushAndRemoveUntil( 
+            // Redirect to the screen that correctly handles unauthenticated state
+            MaterialPageRoute(builder: (context) => AuthLandingScreen()), 
+            (Route<dynamic> route) => false,
+            );
           },
         ),
       ],

@@ -66,7 +66,7 @@ class _SignupViewState extends State<SignupView> {
     }
 
     final passwordRegex = RegExp(
-      r"^(?=.*[A-Za-z])(?=.*\\d)(?=.*[@\$!%*?&])[A-Za-z\\d@\$!%*?&]{8,}\$",
+      r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$",
     );
     if (!passwordRegex.hasMatch(password)) {
       showToast(
@@ -173,7 +173,7 @@ class _SignupViewState extends State<SignupView> {
         if (value == null || value.isEmpty) {
           return 'Please enter your name';
         }
-        if (!RegExp(r"^[a-zA-Z+_.-]+\$").hasMatch(value)) {
+        if (!RegExp(r"^[a-zA-Z+_.-]+$").hasMatch(value)) {
           return 'Enter a valid Name!';
         }
         return null;
@@ -191,7 +191,7 @@ class _SignupViewState extends State<SignupView> {
         if (value == null || value.isEmpty) {
           return 'Please enter your name';
         }
-        if (!RegExp(r"^[a-zA-Z+_.-]+\$").hasMatch(value)) {
+        if (!RegExp(r"^[a-zA-Z+_.-]+$").hasMatch(value)) {
           return 'Enter a valid Name!';
         }
         return null;
@@ -209,7 +209,7 @@ class _SignupViewState extends State<SignupView> {
         if (value == null || value.isEmpty) {
           return 'Please enter your email address';
         }
-        if (!RegExp(r"^[a-zA-Z0-9+_.-]+@[a-zA-Z0-9.-]+\$").hasMatch(value)) {
+        if (!RegExp(r"^[a-zA-Z0-9+_.-]+@[a-zA-Z0-9.-]+$").hasMatch(value)) {
           return 'Enter a valid email address!';
         }
         return null;
