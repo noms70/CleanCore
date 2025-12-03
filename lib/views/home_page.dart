@@ -1,17 +1,75 @@
 import 'package:cc/services/auth_service.dart';
 import 'package:cc/services/firestore_service.dart';
-import 'package:cc/widgets/kpi_card.dart';
 import 'package:flutter/material.dart';
 import 'package:cc/utils/colors.dart';
 import '../widgets/navbar.dart';
 import './settings_page.dart';
 import '../widgets/alert_card.dart';
-import './map_page.dart'; // <-- IMPORT NEW MAP PAGE
-import '../models/models.dart'; // <-- IMPORT NEW MODELS
-import 'dart:io';
+import './map_page.dart';
+import '../models/models.dart';
 import 'dart:convert';
-
 import 'package:cc/models/user_model.dart';
+import 'dart:math'; // Required for the Circular Progress Bar calculations
+
+// =========================================================================
+// 1. **FIXED ERROR:** ProgressPainter must be a top-level class.
+// =========================================================================
+
+/// Custom Painter for the Circular Progress Bar for route completion.
+class ProgressPainter extends CustomPainter {
+  final double progress;
+  final Color baseColor;
+  final Color progressColor;
+  final double strokeWidth;
+
+  ProgressPainter({
+    required this.progress,
+    required this.baseColor,
+    required this.progressColor,
+    required this.strokeWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = min(size.width / 2, size.height / 2) - strokeWidth / 2;
+
+    // Base circle (unfilled part)
+    final basePaint = Paint()
+      ..color = baseColor
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+
+    canvas.drawCircle(center, radius, basePaint);
+
+    // Progress arc (filled part)
+    final progressPaint = Paint()
+      ..color = progressColor
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+
+    double sweepAngle = 2 * pi * progress;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -pi / 2, // Start from the top
+      sweepAngle,
+      false,
+      progressPaint,
+    );
+  }
+
+  @override
+  // Corrected the covariant type and condition check.
+  bool shouldRepaint(covariant ProgressPainter oldDelegate) {
+    return oldDelegate.progress != progress;
+  }
+}
+
+// =========================================================================
+// 2. HomePage Implementation
+// =========================================================================
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -26,24 +84,16 @@ class _HomePageState extends State<HomePage> {
   UserModel? _user;
 
   // Driver information
-  String driverName = 'Ayesha Noman';
-  String currentStatus = 'Offline'; // Offline, On Route, Break
+  String currentStatus = 'Offline';
 
   // Route data
   int completedBins = 12;
   int totalBins = 45;
-  String routeId = 'Route 4B - Downtown';
+  String routeId = 'Route 4B';
   String estimatedTime = '2h 35m';
   int criticalBinsNearby = 3;
 
-  // Performance metrics
-  double efficiencyScore = 87.5;
-  double distanceSaved = 24.3; // km
-  double capacityUsage = 68; // percentage
-
-  // --- MODIFICATION: NEW ISLAMABAD LOCATIONS ---
   // Map markers and locations
-  // THIS DATA IS STILL THE "SOURCE OF TRUTH"
   final List<BinLocation> binLocations = [
     BinLocation(
       id: 'BIN_ISB_001',
@@ -97,13 +147,11 @@ class _HomePageState extends State<HomePage> {
     ),
   ];
 
-  // Map-related state is MOVED to MapPage
-  // --- MODIFICATION: NEW DRIVER STARTING LOCATION ---
+  // Map-related state
   double driverLat = 33.7077; // Centered at Centaurus
   double driverLng = 73.0499;
-  // --- END MODIFICATION ---
 
-  // Alerts
+  // Alerts - **REMOVED from UI, kept for data structure**
   List<Alert> alerts = [
     Alert(
       title: 'New Bin Urgency Detected',
@@ -184,8 +232,11 @@ class _HomePageState extends State<HomePage> {
         backgroundImage = NetworkImage(profilePic);
       } else {
         try {
+          // It's generally better to use a logger, but keeping print for now to match style
+          // ignore: avoid_print
           backgroundImage = MemoryImage(base64Url.decode(profilePic));
         } catch (e) {
+          // ignore: avoid_print
           print("Error decoding base64 image: $e");
           backgroundImage = null;
         }
@@ -250,7 +301,8 @@ class _HomePageState extends State<HomePage> {
                 ),
                 SizedBox(height: screenSize.width * 0.01),
                 Text(
-                  '$firstName $lastName',
+                  // Use the user's name
+                  '${_user!.firstName} ${_user!.lastName}',
                   style: TextStyle(
                     fontSize: screenSize.width * 0.05,
                     fontWeight: FontWeight.bold,
@@ -259,7 +311,7 @@ class _HomePageState extends State<HomePage> {
                 ),
                 SizedBox(height: screenSize.width * 0.01),
                 Text(
-                  'Welcome back! Ready for a Ride?',
+                  'Welcome back! Ready for a Drive?',
                   style: TextStyle(
                     fontSize: screenSize.width * 0.04,
                     color: Colors.white70,
@@ -308,28 +360,6 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
-  }
-
-  String getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) {
-      return 'Good Morning';
-    } else if (hour < 17) {
-      return 'Good Afternoon';
-    } else {
-      return 'Good Evening';
-    }
-  }
-
-  Color getStatusColor() {
-    switch (currentStatus) {
-      case 'On Route':
-        return Colors.green;
-      case 'Break':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
   }
 
   @override
@@ -405,133 +435,69 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // --- NEW METHOD TO BUILD JUST THE HOME PAGE'S CONTENT ---
+  // --- MODIFIED METHOD TO BUILD JUST THE HOME PAGE'S CONTENT ---
   Widget _buildHomePageContent(Size screenSize) {
-    return Stack(
-      children: [
-        Column(
-          children: [
-            _buildUserInfo(context, screenSize),
-            // GoogleMap WIDGET REMOVED
-            // _buildBinTile ListView REMOVED
-            Expanded(
-              flex: 1,
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    _buildRouteSummary(),
-                    const SizedBox(height: 16),
-                    //_buildKPIs(), // <-- UNCOMMENTED
-                    const SizedBox(height: 20),
-                    _buildAlerts(), // <-- MOVED HERE FOR LAYOUT
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          _buildUserInfo(context, screenSize),
+          const SizedBox(height: 20),
+          _buildCircularProgressSection(screenSize), // NEW SECTION
+          const SizedBox(height: 30),
+          _buildKeyRouteMetricsGrid(screenSize), // NEW SECTION
+          const SizedBox(height: 100), // Extra space for NavBar clearance
+        ],
+      ),
     );
   }
 
-  Widget _buildRouteSummary() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppCol.btnbacks.withOpacity(0.2), width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  // --- NEW: Circular Progress Bar for Route Completion ---
+  Widget _buildCircularProgressSection(Size screenSize) {
+    final progress = completedBins / totalBins;
+    final progressPercentage = (progress * 100).toStringAsFixed(0);
+
+    return Center(
+      child: SizedBox(
+        width: screenSize.width * 0.5,
+        height: screenSize.width * 0.5,
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            Row(
+            // **FIXED ERROR:** ProgressPainter is now a top-level class and is used correctly.
+            CustomPaint(
+              size: Size(screenSize.width * 0.5, screenSize.width * 0.5),
+              painter: ProgressPainter(
+                progress: progress,
+                baseColor: AppCol.btnbacks.withOpacity(0.2),
+                progressColor: AppCol.btnbacks,
+                strokeWidth: 12.0,
+              ),
+            ),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.map, color: AppCol.btnbacks, size: 24),
-                const SizedBox(width: 12),
+                Icon(
+                  Icons.delete_sweep_sharp, // Bin/Sweep Icon
+                  size: screenSize.width * 0.1,
+                  color: AppCol.btnbacks,
+                ),
+                const SizedBox(height: 8),
                 Text(
-                  'Today\'s Route',
-                  style: const TextStyle(
-                    fontSize: 18,
+                  '$progressPercentage%',
+                  style: TextStyle(
+                    fontSize: screenSize.width * 0.1,
                     fontWeight: FontWeight.bold,
                     color: AppCol.btntext,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _buildRouteSummaryRow('Route ID', routeId),
-            const SizedBox(height: 12),
-            _buildRouteSummaryRow('Total Bins', '$totalBins Bins'),
-            const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Progress',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppCol.btntext,
-                      ),
-                    ),
-                    Text(
-                      '$completedBins / $totalBins Collected',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppCol.textGrey,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: completedBins / totalBins,
-                    minHeight: 8,
-                    backgroundColor: AppCol.btnbacks.withOpacity(0.2),
-                    valueColor: AlwaysStoppedAnimation<Color>(AppCol.btnbacks),
+                Text(
+                  'Route Progress',
+                  style: TextStyle(
+                    fontSize: screenSize.width * 0.04,
+                    color: AppCol.textGrey,
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            _buildRouteSummaryRow('Est. Completion', estimatedTime),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.warning_amber, color: Colors.red, size: 20),
-                  const SizedBox(width: 10),
-                  Text(
-                    '$criticalBinsNearby Critical Bins Nearby (95%+ Full)',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.red,
-                    ),
-                  ),
-                ],
-              ),
             ),
           ],
         ),
@@ -539,72 +505,114 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildRouteSummaryRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: AppCol.btntext,
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: AppCol.ngt,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAlerts() {
-    if (alerts.isEmpty) {
-      return const SizedBox.shrink();
-    }
+  // --- NEW: Grid of 4 Key Route Metrics Cards ---
+  Widget _buildKeyRouteMetricsGrid(Size screenSize) {
+    final double cardWidth =
+        (screenSize.width - 50) / 2; // Adjusted calculation for padding/spacing
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 4.0, bottom: 10),
+            child: Text(
+              'Route Overview',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppCol.btntext,
+              ),
+            ),
+          ),
+          GridView.count(
+            physics:
+                const NeverScrollableScrollPhysics(), // Important for SingleChildScrollView
+            shrinkWrap: true,
+            crossAxisCount: 2,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: cardWidth /
+                (cardWidth * 0.6), // Adjust to make cards wider than tall
+            children: [
+              _buildMetricCard(
+                'Route ID',
+                routeId,
+                Icons.alt_route,
+                AppCol.btnbacks,
+              ),
+              _buildMetricCard(
+                'Est. Completion',
+                estimatedTime,
+                Icons.schedule,
+                Colors.orange,
+              ),
+              _buildMetricCard(
+                'Critical Bins',
+                '$criticalBinsNearby Bins',
+                Icons.crisis_alert,
+                Colors.red,
+              ),
+              _buildMetricCard(
+                'Total Bins',
+                '$totalBins Bins',
+                Icons.pin_drop,
+                AppCol.ngt,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricCard(
+      String title, String value, IconData icon, Color color) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 5,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
           Row(
             children: [
-              const Icon(Icons.notifications_active, color: AppCol.btnbacks),
+              Icon(icon, color: color, size: 20),
               const SizedBox(width: 8),
-              const Text(
-                'Alerts & Notifications',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppCol.btntext,
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppCol.btnbacks.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
+              Flexible(
                 child: Text(
-                  '${alerts.length}',
-                  style: const TextStyle(
+                  title,
+                  style: TextStyle(
                     fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: AppCol.btnbacks,
+                    fontWeight: FontWeight.w600,
+                    color: color,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          ...alerts.map((alert) => AlertCard(alert: alert)),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: AppCol.btntext,
+            ),
+          ),
         ],
       ),
     );

@@ -1,16 +1,16 @@
-import 'package:cc/Supporting/google.dart'; // Your Google AuthMethods
+import 'package:cc/Supporting/google.dart';
 import 'package:cc/models/user_model.dart';
-import 'package:cc/services/firestore_service.dart'; // Import FirestoreService
-import 'package:cc/utils/colors.dart'; // For showToast
+import 'package:cc/services/firestore_service.dart';
+import 'package:cc/utils/colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
-  final AuthMethods _authMethods = AuthMethods(); // Your Google sign-in logic
-  final FirestoreService _firestoreService =
-  FirestoreService(); // Instantiate FirestoreService
+  final AuthMethods _authMethods = AuthMethods();
+  final FirestoreService _firestoreService = FirestoreService();
 
   /// Stream to listen for auth state changes.
   Stream<User?> get authStateChanges => _firebaseAuth.authStateChanges();
@@ -32,20 +32,25 @@ class AuthService {
   /// Signs in with email and password.
   /// Returns `null` on success, or an error [String] on failure.
   Future<String?> signInWithEmail(String email, String password) async {
+    if (!email.toLowerCase().endsWith('@gmail.com')) {
+      return "Only Gmail accounts are allowed.";
+    }
+
     try {
-      await _firebaseAuth.signInWithEmailAndPassword(
+      final userCredential = await _firebaseAuth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
 
-      // Check for email verification
-      // if (userCredential.user != null && !userCredential.user!.emailVerified) {
-      //   await _firebaseAuth.signOut(); // Sign out unverified user
-      //   return "Please verify your email address before logging in.";
-      // }
+      final user = userCredential.user;
 
-      // Success
-      return null;
+      // Check for email verification
+      if (user != null && !user.emailVerified) {
+        await _firebaseAuth.signOut();
+        return "Please verify your email address before logging in.";
+      }
+
+      return null; // success
     } on FirebaseAuthException catch (e) {
       return _handleAuthException(e);
     } catch (e) {
@@ -53,7 +58,8 @@ class AuthService {
     }
   }
 
-  /// Creates a new user, saves to Firestore, sends verification, and signs out.
+  /// Creates a new user and sends verification email.
+  /// Does NOT create Firestore document - that happens after verification.
   /// Returns `null` on success, or an error [String] on failure.
   Future<String?> signUpWithEmail({
     required String email,
@@ -61,15 +67,12 @@ class AuthService {
     required String firstName,
     required String lastName,
   }) async {
-    // Domain restriction check
-    if (!email.toLowerCase().endsWith('@smartends.com')) {
-      return "Sign up is restricted to @smartends.com company emails only.";
-    }
-
     try {
       // 1. Create user in Firebase Auth
       final userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
-          email: email, password: password);
+        email: email,
+        password: password,
+      );
 
       if (userCredential.user == null) {
         throw Exception("User creation failed unexpectedly.");
@@ -77,27 +80,16 @@ class AuthService {
 
       final user = userCredential.user!;
 
-      // 2. Create a UserModel
-      final newUser = UserModel(
-        uid: user.uid,
-        email: email,
-        firstName: firstName,
-        lastName: lastName,
-        profilePicture: '', // Default empty URL
-        createdAt: Timestamp.now(),
-      );
+      // 2. Send verification email
+      await user.sendEmailVerification();
 
-      // 3. Save user data to Firestore
-      await _firestoreService.createUser(newUser);
+      // 3. Sign out immediately - user must verify before accessing app
+      await _firebaseAuth.signOut();
 
-      // 4. Send verification email
-      // await user.sendEmailVerification();
+      // Note: Firestore document creation happens in VerificationPage
+      // after email is verified
 
-      // 5. Sign out to force verification
-      // await _firebaseAuth.signOut();
-
-      // Success (verification email sent)
-      return null;
+      return null; // success
     } on FirebaseAuthException catch (e) {
       return _handleAuthException(e);
     } catch (e) {
@@ -107,35 +99,48 @@ class AuthService {
 
   /// Signs in with Google and saves user data to Firestore if new.
   /// Returns `null` on success, or an error [String] on failure.
-  Future<String?> signInWithGoogle(BuildContext context) async {
+Future<String?> signInWithGoogle(BuildContext context) async {
     try {
-      // Your AuthMethods handles the Google sign-in popup and @smartends.com check
-      bool isLoggedIn = await _authMethods.signInWithGoogle(context);
+      UserCredential userCredential;
 
-      if (isLoggedIn && _firebaseAuth.currentUser != null) {
-        final user = _firebaseAuth.currentUser!;
+      
+        // Mobile sign-in
+        final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+        if (googleUser == null) return "Sign-in cancelled";
 
-        // Check if user already exists in Firestore
-        final firestoreUser = await _firestoreService.getUser(user.uid);
+        final GoogleSignInAuthentication googleAuth =
+            await googleUser.authentication;
 
-        if (firestoreUser == null) {
-          // New Google sign-in user, save to Firestore
-          final newUser = UserModel(
-            uid: user.uid,
-            email: user.email ?? '',
-            firstName: user.displayName?.split(' ')[0] ?? '',
-            lastName: user.displayName?.split(' ').sublist(1).join(' ') ?? '',
-            profilePicture: user.photoURL ?? '',
-            createdAt: Timestamp.now(),
-          );
-          await _firestoreService.createUser(newUser);
-        }
-        return null; // Success
-      } else {
-        // AuthMethods already shows a toast, but we return a message
-        // to prevent the UI from proceeding.
-        return ""; // Empty string means failure but toast was already shown
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+
+        userCredential =
+            await _firebaseAuth.signInWithCredential(credential);
+      
+
+      final user = userCredential.user;
+      if (user == null) return "Google sign-in failed";
+
+      // Check if user exists in Firestore
+      final firestoreUser = await _firestoreService.getUser(user.uid);
+
+      if (firestoreUser == null) {
+        // New user: save to Firestore
+        final newUser = UserModel(
+          uid: user.uid,
+          email: user.email ?? '',
+          firstName: user.displayName?.split(' ')[0] ?? '',
+          lastName: user.displayName?.split(' ').sublist(1).join(' ') ?? '',
+          profilePicture: user.photoURL ?? '',
+          createdAt: Timestamp.now(),
+        );
+
+        await _firestoreService.createUser(newUser);
       }
+
+      return null; // Success
     } catch (e) {
       showToast(
         'An unexpected error occurred during Google sign-in: $e',
@@ -161,40 +166,30 @@ class AuthService {
   Future<void> signOut() async {
     try {
       await _firebaseAuth.signOut();
-      // Also sign out from Google
       await _authMethods.signOut();
     } catch (e) {
       print("Error signing out: $e");
     }
   }
 
-  // Inside the AuthService class
-
-/// Deletes the currently signed-in Firebase user account.
-/// Returns null on success, or an error String on failure.
-Future<String?> deleteAccount() async {
-  final user = _firebaseAuth.currentUser;
-  if (user == null) {
-    return "No active user found to delete.";
-  }
-
-  try {
-    // Attempt to delete the user from Firebase Authentication
-    await user.delete();
-    
-    // Note: The Firestore document deletion must be handled *before* // or simultaneously with this method call in the ProfilePage UI logic.
-    
-    return null; // Success
-  } on FirebaseAuthException catch (e) {
-    if (e.code == 'requires-recent-login') {
-      // This is the most common error: the user's login session is too old.
-      // Firebase requires re-authentication before account deletion.
-      return 'Security Error: Please sign out and sign in again to confirm account deletion.';
+  /// Deletes the currently signed-in Firebase user account.
+  /// Returns null on success, or an error String on failure.
+  Future<String?> deleteAccount() async {
+    final user = _firebaseAuth.currentUser;
+    if (user == null) {
+      return "No active user found to delete.";
     }
-    // Handle other authentication errors
-    return _handleAuthException(e);
-  } catch (e) {
-    return 'An unexpected error occurred during account deletion.';
+
+    try {
+      await user.delete();
+      return null; // Success
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'requires-recent-login') {
+        return 'Security Error: Please sign out and sign in again to confirm account deletion.';
+      }
+      return _handleAuthException(e);
+    } catch (e) {
+      return 'An unexpected error occurred during account deletion.';
+    }
   }
-}
 }

@@ -28,7 +28,7 @@ class _LoginViewState extends State<LoginView> {
   @override
   void initState() {
     super.initState();
-    // _loadRememberedCredentials(); // You can re-enable this
+    _loadRememberedCredentials(); // You can re-enable this
   }
 
   @override
@@ -38,16 +38,15 @@ class _LoginViewState extends State<LoginView> {
     super.dispose();
   }
 
-  // Example of loading credentials (if you re-enable it)
-  // Future<void> _loadRememberedCredentials() async {
-  //   final userAuth = await SharedPreferences.getInstance();
-  //   if (userAuth.getBool('rememberMe') ?? false) {
-  //     setState(() {
-  //       _emailController.text = userAuth.getString('rememberedEmail') ?? '';
-  //       _rememberMe = true;
-  //     });
-  //   }
-  // }
+  Future<void> _loadRememberedCredentials() async {
+    final userAuth = await SharedPreferences.getInstance();
+    if (userAuth.getBool('rememberMe') ?? false) {
+      setState(() {
+        _emailController.text = userAuth.getString('rememberedEmail') ?? '';
+        _rememberMe = true;
+      });
+    }
+  }
 
   Future<void> _saveCredentials() async {
     final userAuth = await SharedPreferences.getInstance();
@@ -137,12 +136,11 @@ class _LoginViewState extends State<LoginView> {
             SizedBox(height: screenWidth * 0.02),
             _buildSubmitButton(screenWidth),
             SizedBox(height: screenWidth * 0.02),
-            // "Don't have an account?" is handled by the parent screen's header
-            _buildOrDivider(),
-            _buildSocialLoginButton(
-              logoPath: 'assets/Google.png',
-              onPressed: _googleSignIn,
-            ),
+            //_buildOrDivider(),
+            //_buildSocialLoginButton(
+              //logoPath: 'assets/Google.png',
+              //onPressed: _googleSignIn,
+           // ),
           ],
         ),
       ),
@@ -154,7 +152,7 @@ class _LoginViewState extends State<LoginView> {
       icon: Icons.email,
       controller: _emailController,
       labelText: 'Email',
-      hintText: 'Enter your @smartends.com email',
+      hintText: 'Enter your email',
       validator: (value) {
         if (value == null || value.isEmpty) {
           return 'Please enter your email address';

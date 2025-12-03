@@ -1,4 +1,4 @@
-import 'package:cc/utils/colors.dart'; // Assumes AppCol is here
+import 'package:cc/utils/colors.dart';
 import 'package:cc/views/login_view.dart';
 import 'package:cc/views/signup_view.dart';
 import 'package:flutter/material.dart';
@@ -51,12 +51,11 @@ class _AuthLandingScreenState extends State<AuthLandingScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header Toggle
             _buildHeaderToggle(screenHeight, screenWidth, isPortrait),
             SizedBox(
               height: isPortrait ? screenHeight * 0.03 : screenWidth * 0.03,
             ),
-            // Form Container
+            
             Expanded(
               child: Container(
                 decoration: const BoxDecoration(
@@ -120,7 +119,7 @@ class _AuthLandingScreenState extends State<AuthLandingScreen> {
     final isPortrait = screenHeight > screenWidth;
 
     return GestureDetector(
-      onTap: onTap, // Use the new tap handler
+      onTap: onTap, 
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
