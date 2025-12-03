@@ -2,10 +2,9 @@ import 'package:cc/services/auth_service.dart';
 import 'package:cc/utils/colors.dart';
 import 'package:cc/widgets/custom_text_form_field.dart';
 import 'package:flutter/material.dart';
-import 'package:cc/utils/verification.dart';
-
 import 'home_page.dart';
-// import 'package:cc/homePage.dart'; // Assuming this file exists
+import 'verification_page.dart';
+
 
 class SignupView extends StatefulWidget {
   const SignupView({super.key});
@@ -53,17 +52,14 @@ class _SignupViewState extends State<SignupView> {
     final password = _passwordController.text.trim();
     final firstName = _firstNameController.text.trim();
     final lastName = _lastNameController.text.trim();
-    // final phone = "_selectedCountryCode\${_phoneController.text.trim()}"; // Full phone number
-
-    // --- DOMAIN RESTRICTION CHECK ---
-    // This check is now also in the AuthService, but good to have on client-side
-    if (!email.toLowerCase().endsWith('@smartends.com')) {
+    if (!email.toLowerCase().endsWith('@gmail.com')) {
       showToast(
-        "Sign up is restricted to @smartends.com company emails only.",
-        isError: true,
+          "Please sign up using your Gmail address.",
+      isError: true,
       );
-      return;
+          return;
     }
+
 
     final passwordRegex = RegExp(
       r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$",
@@ -84,20 +80,14 @@ class _SignupViewState extends State<SignupView> {
       password: password,
       firstName: firstName,
       lastName: lastName,
-      // phone: phone, // You can pass this to your service if needed
     );
 
     if (!mounted) return;
 
     if (result == null) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const HomePage(),
-        ), // Make sure HomePage is imported
-      );
+      
       // Success - email verification sent. Navigate to verification page.
-      /*
+      
       final isVerified =
           await Navigator.push(
             context,
@@ -123,7 +113,7 @@ class _SignupViewState extends State<SignupView> {
       } else {
         showToast("Verification failed or cancelled.", isError: true);
       }
-      */
+      
     } else {
       // Failure
       showToast(result, isError: true);
@@ -156,7 +146,6 @@ class _SignupViewState extends State<SignupView> {
             SizedBox(height: screenWidth * 0.02),
             _buildSubmitButton(screenWidth),
             SizedBox(height: screenWidth * 0.02),
-            // "Already have an account?" is handled by the parent screen's header
           ],
         ),
       ),
@@ -203,8 +192,8 @@ class _SignupViewState extends State<SignupView> {
     return CustomTextFormField(
       icon: Icons.email,
       controller: _emailController,
-      labelText: 'Company Email',
-      hintText: 'Enter your @smartends.com email',
+      labelText: 'Email',
+      hintText: 'Enter your email',
       validator: (value) {
         if (value == null || value.isEmpty) {
           return 'Please enter your email address';
@@ -216,37 +205,51 @@ class _SignupViewState extends State<SignupView> {
       },
     );
   }
-
-  Widget _buildPasswordField(double screenWidth) {
-    return CustomTextFormField(
-      icon: Icons.lock,
-      controller: _passwordController,
-      labelText: 'Password',
-      hintText: 'Enter your password',
-      obscureText: !_isPasswordVisible,
-      suffixIcon: IconButton(
-        icon: Icon(
-          _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
-          color: Colors.grey,
-        ),
-        onPressed: () {
-          setState(() {
-            _isPasswordVisible = !_isPasswordVisible;
-          });
-        },
+Widget _buildPasswordField(double screenWidth) {
+  return CustomTextFormField(
+    icon: Icons.lock,
+    controller: _passwordController,
+    labelText: 'Password',
+    hintText: 'Enter your password',
+    obscureText: !_isPasswordVisible,
+    suffixIcon: IconButton(
+      icon: Icon(
+        _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+        color: Colors.grey,
       ),
-      validator: (value) {
-        if (value == null || value.isEmpty) {
-          return 'Please enter your password';
-        }
-        // Note: Stronger regex validation is in _signup()
-        if (value.length < 8) {
-          return 'Password should be at least 8 characters';
-        }
-        return null;
+      onPressed: () {
+        setState(() {
+          _isPasswordVisible = !_isPasswordVisible;
+        });
       },
-    );
-  }
+    ),
+    
+    validator: (value) {
+      if (value == null || value.isEmpty) {
+        return 'Please enter your password.';
+      }
+
+      // 1. Check Length (Min 8 characters)
+      if (value.length < 8) {
+        return 'Must be at least 8 characters.';
+      }
+
+      // 2. Check Uppercase
+      if (!RegExp(r'[A-Z]').hasMatch(value)) {
+        return 'Must include 1 uppercase letter.';
+      }
+
+      // 3. Check Special Character
+      // The RegEx below checks for one of the common special characters.
+      if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) {
+        return 'Must include 1 special character.';
+      }
+
+      return null; // All checks passed
+    },
+    
+  );
+}
 
   Widget _buildConfirmPasswordField(double screenWidth) {
     return CustomTextFormField(
@@ -277,68 +280,6 @@ class _SignupViewState extends State<SignupView> {
       },
     );
   }
-
-  // Widget _buildPhoneField(double screenWidth) {
-  //   final isPortrait =
-  //       MediaQuery.of(context).orientation == Orientation.portrait;
-
-  //   return Padding(
-  //     padding: EdgeInsets.only(bottom: screenWidth * 0.05),
-  //     child: Row(
-  //       crossAxisAlignment: CrossAxisAlignment.center,
-  //       children: [
-  //         Icon(Icons.phone, size: screenWidth * 0.07, color: AppCol.btntext),
-  //         const SizedBox(width: 8),
-  //         Expanded(
-  //           child: TextFormField(
-  //             controller: _phoneController,
-  //             keyboardType: TextInputType.phone,
-  //             decoration: InputDecoration(
-  //               labelText: 'Phone Number',
-  //               labelStyle: TextStyle(fontSize: screenWidth * 0.04),
-  //               hintText: 'Enter your phone number',
-  //               hintStyle: TextStyle(
-  //                 fontSize: screenWidth * 0.035,
-  //                 color: Colors.grey[500],
-  //               ),
-  //               prefixIcon: DropdownButtonHideUnderline(
-  //                 child: DropdownButton<String>(
-  //                   value: _selectedCountryCode,
-  //                   onChanged: (String? newValue) {
-  //                     setState(() {
-  //                       _selectedCountryCode = newValue!;
-  //                     });
-  //                   },
-  //                   items: _countryCodes.map((String code) {
-  //                     return DropdownMenuItem<String>(
-  //                       value: code,
-  //                       child: Text(code),
-  //                     );
-  //                   }).toList(),
-  //                 ),
-  //               ),
-  //               prefixIconConstraints: BoxConstraints(
-  //                 minWidth: screenWidth * 0.1,
-  //                 minHeight: isPortrait
-  //                     ? screenWidth * 0.06
-  //                     : screenWidth * 0.05,
-  //               ),
-  //             ),
-  //             validator: (value) {
-  //               if (value == null || value.isEmpty) {
-  //                 return 'Please enter your phone number';
-  //               }
-  //               if (!RegExp(r"^\\d{10,15}\$").hasMatch(value)) {
-  //                 return 'Enter a valid phone number!';
-  //               }
-  //               return null;
-  //             },
-  //           ),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
 
   Widget _buildSubmitButton(double screenWidth) {
     return Container(

@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:cc/widgets/appbar.dart';
+//import 'package:cc/widgets/appbar.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -74,7 +74,7 @@ class _MapPageState extends State<MapPage> {
     });
   }
 
-  // --- NEW FUNCTION: Manually re-center on user location ---
+
   void _recenterMap() async {
     try {
       Position position = await _determinePosition();
@@ -135,7 +135,7 @@ class _MapPageState extends State<MapPage> {
     _mapController = controller;
   }
 
-  // ✅ NEW: Alternative _createRoute function using OSRM
+ 
   void _createRoute(BinLocation bin) async {
     LatLng origin;
     if (_currentPosition != null) {

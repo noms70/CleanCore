@@ -102,10 +102,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-// In lib/views/profile_page.dart
-
-// In lib/views/profile_page.dart
-
 void _showDeleteAccountDialog() {
   showDialog(
     context: context,
@@ -123,7 +119,6 @@ void _showDeleteAccountDialog() {
         ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
           onPressed: () async {
-            // 1. Close the AlertDialog immediately
             Navigator.pop(context); 
 
             if (_user == null || _user!.uid.isEmpty) {
@@ -134,16 +129,16 @@ void _showDeleteAccountDialog() {
             final uid = _user!.uid;
 
             try {
-              // 2. Delete Firestore Data
+              // Delete Firestore Data
               await _firestoreService.deleteUserDocument(uid);
               
-              // 3. Delete the Auth User (Requires recent login, handles token revocation)
+              // Delete the Auth User
               final authError = await _authService.deleteAccount();
 
               if (!mounted) return;
 
               if (authError != null) {
-                // AUTH FAILED: If the error is 'requires-recent-login', show the error
+                // AUTH FAILED
                 showToast(authError, isError: true);
                 
                 // Sign out to force the user to re-authenticate if they want to try again
@@ -160,11 +155,7 @@ void _showDeleteAccountDialog() {
                 });
 
               } else {
-                // AUTH SUCCEEDED: Both Auth record and Firestore data are gone.
                 showToast('Your account has been successfully deleted.');
-                
-                // CRITICAL FIX: Use addPostFrameCallback to ensure navigation 
-                // runs *after* the current frame renders the success message.
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted) {
                     Navigator.of(context).pushAndRemoveUntil(
@@ -175,7 +166,6 @@ void _showDeleteAccountDialog() {
                 });
               }
             } catch (e) {
-              // Catch any unexpected general errors (network, permissions, etc.)
               if (!mounted) return;
               showToast('Account deletion failed due to an unexpected error. Please try again.', isError: true);
               print('Full Deletion Error: $e');
@@ -340,14 +330,11 @@ void _showDeleteAccountDialog() {
           icon: Icons.logout,
           title: "Sign Out",
           onTap: () async {
-          // 1. Sign out the user
+
           await _authService.signOut();
     
             if (!mounted) return;
-      
-            // 2. Navigate to the AuthLandingScreen and clear all previous history.
             Navigator.of(context).pushAndRemoveUntil( 
-            // Redirect to the screen that correctly handles unauthenticated state
             MaterialPageRoute(builder: (context) => AuthLandingScreen()), 
             (Route<dynamic> route) => false,
             );

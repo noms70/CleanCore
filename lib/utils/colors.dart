@@ -25,7 +25,7 @@ class AppCol {
   static const Color loginBack = Color(0xFF212121); // button second color
   static const Color headers = Color(0xFFFAF3FB); // header section start color
   static const Color headere = Color(0xFFB9FBFB); // header section end color
-
+  static const Color primary = Color(0xFFB9FBFB); // header section end color
   static const Color appbg = Colors.teal;
 
   static const LinearGradient headerback = LinearGradient(
