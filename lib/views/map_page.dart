@@ -1,14 +1,13 @@
-import 'dart:convert';
-import 'package:cc/widgets/appbar.dart';
-import 'package:http/http.dart' as http;
-import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:cc/services/route_service.dart';
 import 'package:cc/utils/colors.dart';
-import '../widgets/navbar.dart';
-import '../models/models.dart';
+import 'package:cc/widgets/navbar.dart';
+import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../models/models.dart';
 
+/// MapPage is a purely presentational widget.
+/// All routing / sorting logic lives in [RouteService].
 class MapPage extends StatefulWidget {
   final String currentPage;
   final Function(String) onNavigate;
@@ -30,439 +29,222 @@ class MapPage extends StatefulWidget {
 }
 
 class _MapPageState extends State<MapPage> {
-  // --- STATE VARIABLES ---
+  // ─── Map & Location ──────────────────────────────────────────────────────
   GoogleMapController? _mapController;
-  Set<Marker> _markers = {};
-  BinLocation? selectedBin;
-  Set<Polyline> _polylines = {};
-
   CameraPosition? _initialPosition;
-  bool _isLoading = true;
   Position? _currentPosition;
+  bool _isMapLoading = true;
 
-  late PolylinePoints _polylinePoints;
+  // ─── Route State ─────────────────────────────────────────────────────────
+  /// Bins sorted by priority (critical first, then fullness descending)
+  late List<BinLocation> _sortedBins;
+  Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
+  bool _isRouteLoading = false;
+  bool _routeBuilt = false;
+
+  // ─── Lifecycle ───────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
-    _polylinePoints = PolylinePoints(
-      apiKey: "AIzaSyBzGVNtpx96mevl5hXFpx7n-ZeAeM3u1k8",
-    ); // No API key needed
+    _sortedBins = RouteService.sortByPriority(widget.binLocations);
     _setupMap();
   }
 
-  void _setupMap() async {
+  @override
+  void dispose() {
+    _mapController?.dispose();
+    super.dispose();
+  }
+
+  // ─── Setup ───────────────────────────────────────────────────────────────
+
+  Future<void> _setupMap() async {
     try {
       _currentPosition = await _determinePosition();
       _initialPosition = CameraPosition(
         target: LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
-        zoom: 14.5,
+        zoom: 13.0,
       );
-    } catch (e) {
-      print("Error getting location: $e");
-      // Fallback to the driver location passed from HomePage if permission denied
+    } catch (_) {
       _initialPosition = CameraPosition(
         target: LatLng(widget.driverLat, widget.driverLng),
-        zoom: 11.5,
+        zoom: 12.0,
       );
     }
 
-    _generateBinMarkers();
-
-    setState(() {
-      _isLoading = false;
-    });
+    _buildMarkers();
+    setState(() => _isMapLoading = false);
   }
 
-  // --- NEW FUNCTION: Manually re-center on user location ---
-  void _recenterMap() async {
-    try {
-      Position position = await _determinePosition();
-      _mapController?.animateCamera(
-        CameraUpdate.newCameraPosition(
-          CameraPosition(
-            target: LatLng(position.latitude, position.longitude),
-            zoom: 16.0,
-          ),
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not get current location')),
-      );
-    }
-  }
+  // ─── Markers ─────────────────────────────────────────────────────────────
 
-  void _generateBinMarkers() {
-    Set<Marker> markers = {};
-    for (var bin in widget.binLocations) {
-      Color markerColor;
-      if (bin.isCritical) {
-        markerColor = Colors.red;
-      } else if (bin.fullness > 70) {
-        markerColor = Colors.yellow;
-      } else {
-        markerColor = Colors.green;
-      }
+  void _buildMarkers() {
+    final Set<Marker> markers = {};
+
+    // Numbered bin markers
+    for (int i = 0; i < _sortedBins.length; i++) {
+      final bin = _sortedBins[i];
+      final double hue = bin.isCritical
+          ? BitmapDescriptor.hueRed
+          : bin.fullness > 70
+              ? BitmapDescriptor.hueOrange
+              : BitmapDescriptor.hueGreen;
 
       markers.add(
         Marker(
           markerId: MarkerId(bin.id),
           position: LatLng(bin.lat, bin.lng),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            markerColor == Colors.red
-                ? BitmapDescriptor.hueRed
-                : markerColor == Colors.yellow
-                ? BitmapDescriptor.hueYellow
-                : BitmapDescriptor.hueGreen,
-          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(hue),
           infoWindow: InfoWindow(
-            title: bin.id,
-            snippet: '${bin.fullness}% Full - ${bin.area}',
+            title: 'Stop ${i + 1}: ${bin.id}',
+            snippet: '${bin.fullness}% full — ${bin.area}',
           ),
-          onTap: () {
-            _showBinDetails(bin);
-          },
         ),
       );
     }
-    setState(() {
-      _markers = markers;
-    });
+
+    setState(() => _markers = markers);
   }
 
-  void _onMapCreated(GoogleMapController controller) {
-    _mapController = controller;
-  }
+  // ─── Route ───────────────────────────────────────────────────────────────
 
-  // ✅ NEW: Alternative _createRoute function using OSRM
-  void _createRoute(BinLocation bin) async {
-    LatLng origin;
-    if (_currentPosition != null) {
-      origin = LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
-    } else {
-      origin = LatLng(widget.driverLat, widget.driverLng);
-    }
+  Future<void> _buildCollectionRoute() async {
+    setState(() => _isRouteLoading = true);
 
-    LatLng destination = LatLng(bin.lat, bin.lng);
+    final LatLng origin = _currentPosition != null
+        ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
+        : LatLng(widget.driverLat, widget.driverLng);
 
-    // OSRM API URL
-    // Format: http://router.project-osrm.org/route/v1/driving/{lng1},{lat1};{lng2},{lat2}?overview=full&geometries=polyline
-    String url =
-        'http://router.project-osrm.org/route/v1/driving/'
-        '${origin.longitude},${origin.latitude};'
-        '${destination.longitude},${destination.latitude}'
-        '?overview=full&geometries=polyline';
+    final polylinePoints = await RouteService.buildCollectionRoute(
+      origin: origin,
+      waypoints: _sortedBins,
+    );
 
-    List<LatLng> polylineCoordinates = [];
-
-    try {
-      var response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        var data = json.decode(response.body);
-        String encodedPolyline = data['routes'][0]['geometry'];
-
-        // Use the flutter_polyline_points package just to decode the string
-        List<PointLatLng> decodedPoints = PolylinePoints.decodePolyline(
-          encodedPolyline,
-        );
-        polylineCoordinates = decodedPoints
-            .map((point) => LatLng(point.latitude, point.longitude))
-            .toList();
-      } else {
-        print("Error with OSRM API: ${response.statusCode}");
-      }
-    } catch (e) {
-      print("Error fetching route from OSRM: $e");
-    }
-
-    // Fallback to straight line if API call fails
-    if (polylineCoordinates.isEmpty) {
-      polylineCoordinates = [origin, destination];
-    }
+    final allPoints = [origin, ...polylinePoints];
+    final bounds = RouteService.getBounds(allPoints);
 
     setState(() {
-      _polylines.clear();
       _polylines = {
         Polyline(
-          polylineId: const PolylineId('route_to_bin'),
-          points: polylineCoordinates,
+          polylineId: const PolylineId('collection_route'),
+          points: polylinePoints,
           color: AppCol.btnbacks,
           width: 5,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          jointType: JointType.round,
         ),
       };
+      _routeBuilt = true;
+      _isRouteLoading = false;
     });
 
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLngBounds(_getBounds([origin, destination]), 100),
+    await _mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(bounds, 70),
     );
+  }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Route created to ${bin.id}'),
-          duration: const Duration(seconds: 2),
+  // ─── Location ────────────────────────────────────────────────────────────
+
+  Future<void> _recenterMap() async {
+    try {
+      final pos = await _determinePosition();
+      _mapController?.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: LatLng(pos.latitude, pos.longitude),
+            zoom: 16.0,
+          ),
         ),
       );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not get current location')),
+        );
+      }
     }
   }
 
-  LatLngBounds _getBounds(List<LatLng> points) {
-    double minLat = points[0].latitude;
-    double maxLat = points[0].latitude;
-    double minLng = points[0].longitude;
-    double maxLng = points[0].longitude;
-
-    for (var point in points) {
-      minLat = point.latitude < minLat ? point.latitude : minLat;
-      maxLat = point.latitude > maxLat ? point.latitude : maxLat;
-      minLng = point.longitude < minLng ? point.longitude : minLng;
-      maxLng = point.longitude > maxLng ? point.longitude : maxLng;
+  Future<Position> _determinePosition() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return Future.error('Location services are disabled.');
     }
 
-    return LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
-    );
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        return Future.error('Location permissions are denied.');
+      }
+    }
+    if (permission == LocationPermission.deniedForever) {
+      return Future.error('Location permissions are permanently denied.');
+    }
+
+    return Geolocator.getCurrentPosition();
   }
 
-  void _showBinDetails(BinLocation bin) {
-    setState(() {
-      selectedBin = bin;
-    });
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _buildBinDetailsSheet(bin),
-    );
-  }
-
-  Widget _buildBinDetailsSheet(BinLocation bin) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text(
-                'Bin Details',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: AppCol.btntext,
-                ),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: const Icon(Icons.close, size: 28),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _buildDetailRow('ID', bin.id),
-          const SizedBox(height: 12),
-          _buildDetailRow('Area', bin.area),
-          const SizedBox(height: 12),
-          _buildDetailRow('Status', bin.status),
-          const SizedBox(height: 12),
-          _buildDetailRow('Fullness', '${bin.fullness}%'),
-          const SizedBox(height: 12),
-          _buildDetailRow('Capacity', '${bin.capacity}L'),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-              value: bin.fullness / 100,
-              minHeight: 8,
-              backgroundColor: AppCol.btnbacks.withOpacity(0.2),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                bin.isCritical ? Colors.red : AppCol.btnbacks,
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _createRoute(bin);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppCol.btnbacks,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              child: const Text(
-                'Create Route to Bin',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppCol.btnbacke,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: AppCol.textGrey,
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: AppCol.btntext,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBinTile(BinLocation bin) {
-    bool isSelected = selectedBin?.id == bin.id;
-    Color tileColor = bin.isCritical ? Colors.red : Colors.green;
-
-    return GestureDetector(
-      onTap: () => _showBinDetails(bin),
-      child: Container(
-        width: 110,
-        margin: const EdgeInsets.only(right: 10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? AppCol.btnbacks : tileColor.withOpacity(0.3),
-            width: isSelected ? 2 : 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: tileColor.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.delete_outline, color: tileColor, size: 20),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              bin.id,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: AppCol.btntext,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${bin.fullness}%',
-              style: TextStyle(
-                fontSize: 11,
-                color: tileColor,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // ─── Build ───────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       extendBody: true,
-      body: _isLoading
+      body: _isMapLoading
           ? const Center(
-        child: CircularProgressIndicator(color: AppCol.btnbacks),
-      )
+              child: CircularProgressIndicator(color: AppCol.btnbacks),
+            )
           : _initialPosition == null
-          ? const Center(
-        child: Text("Error: Could not load map. Location disabled?"),
-      )
-          : Stack(
-        children: [
-          GoogleMap(
-            onMapCreated: _onMapCreated,
-            initialCameraPosition: _initialPosition!,
-            markers: _markers,
-            polylines: _polylines,
-            myLocationButtonEnabled: false,
-            myLocationEnabled: true,
-            zoomControlsEnabled: false,
-            padding: const EdgeInsets.only(bottom: 10.0),
-          ),
-          Positioned(
-            right: 16,
-            bottom: 250, // Position above the bin list
-            child: FloatingActionButton(
-              heroTag: 'recenter_btn',
-              onPressed: _recenterMap,
-              backgroundColor: Colors.white,
-              mini: true,
-              // Smaller button
-              child: const Icon(Icons.my_location, color: AppCol.btntext),
-            ),
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 90.0),
-              child: SizedBox(
-                height: 140,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  itemCount: widget.binLocations.length,
-                  itemBuilder: (context, index) {
-                    final bin = widget.binLocations[index];
-                    return _buildBinTile(bin);
-                  },
+              ? const Center(
+                  child: Text('Error: Could not load map. Location disabled?'),
+                )
+              : Stack(
+                  children: [
+                    GoogleMap(
+                      onMapCreated: (c) => _mapController = c,
+                      initialCameraPosition: _initialPosition!,
+                      markers: _markers,
+                      polylines: _polylines,
+                      myLocationEnabled: true,
+                      myLocationButtonEnabled: false,
+                      zoomControlsEnabled: false,
+                      padding: const EdgeInsets.only(bottom: 10),
+                    ),
+
+                    // ── Top header card ──────────────────────────────────
+                    Positioned(
+                      top: MediaQuery.of(context).padding.top + 12,
+                      left: 16,
+                      right: 16,
+                      child: _buildRouteHeaderCard(),
+                    ),
+
+                    // ── Recenter FAB ─────────────────────────────────────
+                    Positioned(
+                      right: 16,
+                      bottom: 320,
+                      child: FloatingActionButton.small(
+                        heroTag: 'recenter_btn',
+                        onPressed: _recenterMap,
+                        backgroundColor: Colors.white,
+                        child: const Icon(
+                          Icons.my_location_rounded,
+                          color: AppCol.btnbacke,
+                        ),
+                      ),
+                    ),
+
+                    // ── Bottom collection panel ───────────────────────────
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: _buildCollectionPanel(),
+                    ),
+                  ],
                 ),
-              ),
-            ),
-          ),
-        ],
-      ),
       bottomNavigationBar: NavBar(
         currentPage: widget.currentPage,
         onNavigate: widget.onNavigate,
@@ -470,29 +252,272 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  Future<Position> _determinePosition() async {
-    bool serviceEnabled;
-    LocationPermission permission;
+  // ─── UI Helpers ──────────────────────────────────────────────────────────
 
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      return Future.error('Location services are disabled.');
-    }
+  Widget _buildRouteHeaderCard() {
+    final criticalCount = _sortedBins.where((b) => b.isCritical).length;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppCol.btnbacks.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.route_rounded,
+              color: AppCol.btnbacks,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Collection Route',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppCol.btnbacke,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${_sortedBins.length} stops · $criticalCount critical',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (criticalCount > 0)
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.red,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$criticalCount',
+                    style: const TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        return Future.error('Location permissions are denied');
-      }
-    }
+  Widget _buildCollectionPanel() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 88),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 16,
+            offset: Offset(0, -4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle
+          Container(
+            margin: const EdgeInsets.only(top: 10, bottom: 4),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
 
-    if (permission == LocationPermission.deniedForever) {
-      return Future.error(
-        'Location permissions are permanently denied, we cannot request permissions.',
-      );
-    }
+          // Start Route button
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed:
+                    _isRouteLoading ? null : _buildCollectionRoute,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppCol.btnbacks,
+                  foregroundColor: AppCol.btnbacke,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 0,
+                ),
+                icon: _isRouteLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppCol.btnbacke,
+                        ),
+                      )
+                    : Icon(
+                        _routeBuilt
+                            ? Icons.refresh_rounded
+                            : Icons.play_arrow_rounded,
+                        size: 22,
+                      ),
+                label: Text(
+                  _isRouteLoading
+                      ? 'Building Route…'
+                      : _routeBuilt
+                          ? 'Recalculate Route'
+                          : 'Start Collection Route',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ),
+          ),
 
-    return await Geolocator.getCurrentPosition();
+          // Bin list
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 180),
+            child: ListView.separated(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              itemCount: _sortedBins.length,
+              separatorBuilder: (_, __) => Divider(
+                height: 1,
+                color: Colors.grey.withOpacity(0.15),
+              ),
+              itemBuilder: (_, i) => _buildBinListItem(_sortedBins[i], i + 1),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBinListItem(BinLocation bin, int stopNumber) {
+    final Color statusColor = bin.isCritical
+        ? Colors.red
+        : bin.fullness > 70
+            ? Colors.orange
+            : AppCol.btnbacks;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          // Stop number badge
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '$stopNumber',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: statusColor,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // Bin info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  bin.id,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: AppCol.btnbacke,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  bin.area,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+
+          // Fullness chip
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '${bin.fullness}%',
+              style: TextStyle(
+                color: statusColor,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+
+          if (bin.isCritical) ...[
+            const SizedBox(width: 6),
+            const Icon(Icons.warning_amber_rounded,
+                color: Colors.red, size: 16),
+          ],
+        ],
+      ),
+    );
   }
 }

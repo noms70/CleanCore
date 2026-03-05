@@ -1,9 +1,8 @@
-import 'package:cc/views/auth/auth_landing_screen.dart'; // MODIFIED: Point to auth screen
+import 'package:cc/views/auth/auth_landing_screen.dart';
 import 'package:cc/utils/colors.dart';
 import 'package:cc/views/home_page.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
-// REMOVED: home_page.dart, login_view.dart, and firebase_auth.dart imports
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -14,8 +13,6 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
-  // REMOVED: _isLoggedIn state variable
-
   AnimationController? _fadeController;
   Animation<double>? _fadeAnimation;
 
@@ -23,17 +20,24 @@ class _SplashScreenState extends State<SplashScreen>
   void initState() {
     super.initState();
     _initializeFadeAnimation();
-    _fadeController?.forward(); // Start animation immediately
+    _fadeController?.forward();
 
-    // Navigate to AuthLandingScreen after 3 seconds
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const AuthLandingScreen()),
-        );
-      }
-    });
+    // Check auth state after splash and navigate accordingly
+    Future.delayed(const Duration(seconds: 3), _navigateBasedOnAuthState);
+  }
+
+  /// Navigates to HomePage if already authenticated, otherwise to AuthLandingScreen.
+  void _navigateBasedOnAuthState() {
+    if (!mounted) return;
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    final Widget destination = currentUser != null
+        ? const HomePage()
+        : const AuthLandingScreen();
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => destination),
+    );
   }
 
   @override
@@ -41,8 +45,6 @@ class _SplashScreenState extends State<SplashScreen>
     _fadeController?.dispose();
     super.dispose();
   }
-
-  // REMOVED: _checkLoginStatus() function
 
   void _initializeFadeAnimation() {
     _fadeController = AnimationController(
@@ -66,19 +68,14 @@ class _SplashScreenState extends State<SplashScreen>
         height: double.infinity,
         decoration: BoxDecoration(gradient: AppCol.main),
         child: Column(
-          // MODIFIED: Always center the content
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // REMOVED: Conditional spacer
-
-            // MODIFIED: Unconditional FadeTransition for the logo
             if (_fadeAnimation != null)
               FadeTransition(
                 opacity: _fadeAnimation!,
                 child: Image.asset(
                   'assets/cc_logo.png',
-                  // height: isPortrait ? screenHeight * 0.3 : screenHeight * 0.3,
                   width: isPortrait ? screenWidth * 0.6 : screenWidth * 0.7,
                   fit: BoxFit.contain,
                 ),
@@ -94,15 +91,14 @@ class _SplashScreenState extends State<SplashScreen>
                     ? screenHeight * 0.017
                     : screenHeight * 0.03,
                 color: Colors.white,
-                fontWeight: FontWeight.bold, // Added this line for bold text
+                fontWeight: FontWeight.bold,
               ),
               textAlign: TextAlign.center,
             ),
-
-            // REMOVED: The "Already have an account? Login" TextButton
           ],
         ),
       ),
     );
   }
 }
+

@@ -23,8 +23,8 @@ class AppBuild {
 
           return AnnotatedRegion<SystemUiOverlayStyle>(
             value: const SystemUiOverlayStyle(
-              statusBarColor: Colors.black,
-              statusBarIconBrightness: Brightness.dark,
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.light,
             ),
             child: AppBar(
               automaticallyImplyLeading: true,
