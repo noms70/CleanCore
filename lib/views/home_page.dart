@@ -435,16 +435,21 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildRouteSummary() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF1E2430) : Colors.white;
+    final textColor = isDark ? Colors.white : AppCol.btntext;
+    final subTextColor = isDark ? Colors.white70 : AppCol.textGrey;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: cardColor,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppCol.btnbacks.withOpacity(0.2), width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: isDark ? Colors.black54 : Colors.black.withOpacity(0.05),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -460,10 +465,10 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(width: 12),
                 Text(
                   'Today\'s Route',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: AppCol.btntext,
+                    color: textColor,
                   ),
                 ),
               ],
@@ -479,19 +484,19 @@ class _HomePageState extends State<HomePage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
+                    Text(
                       'Progress',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: AppCol.btntext,
+                        color: textColor,
                       ),
                     ),
                     Text(
                       '$completedBins / $totalBins Collected',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppCol.textGrey,
+                        color: subTextColor,
                       ),
                     ),
                   ],
@@ -540,15 +545,18 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildRouteSummaryRow(String label, String value) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : AppCol.btntext;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: AppCol.btntext,
+            color: textColor,
           ),
         ),
         Text(
@@ -568,6 +576,9 @@ class _HomePageState extends State<HomePage> {
       return const SizedBox.shrink();
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : AppCol.btntext;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Column(
@@ -577,12 +588,12 @@ class _HomePageState extends State<HomePage> {
             children: [
               const Icon(Icons.notifications_active, color: AppCol.btnbacks),
               const SizedBox(width: 8),
-              const Text(
+              Text(
                 'Alerts & Notifications',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: AppCol.btntext,
+                  color: textColor,
                 ),
               ),
               const Spacer(),

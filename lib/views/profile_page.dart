@@ -161,16 +161,21 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? const Color(0xFF0F1117) : const Color(0xFFF0F4F8);
+    final appBarColor = isDark ? const Color(0xFF1A1F2E) : Colors.white;
+    final titleColor = isDark ? Colors.white : AppCol.btnbacke;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F8),
+      backgroundColor: bgColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: appBarColor,
         elevation: 0.5,
-        iconTheme: const IconThemeData(color: AppCol.btnbacke),
-        title: const Text(
+        iconTheme: IconThemeData(color: titleColor),
+        title: Text(
           'Personal Profile',
           style: TextStyle(
-            color: AppCol.btnbacke,
+            color: titleColor,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),
@@ -182,6 +187,10 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildBody() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF1E2430) : Colors.white;
+    final titleColor = isDark ? Colors.white : AppCol.btnbacke;
+    final shadowColor = isDark ? Colors.black54 : Colors.black.withOpacity(0.05);
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 28, 20, 40),
       child: Column(
@@ -246,6 +255,8 @@ class _ProfilePageState extends State<ProfilePage> {
             icon: Icons.delete_rounded,
             label: 'Delete Account',
             iconColor: Colors.red,
+            cardColor: cardColor,
+            shadowColor: shadowColor,
             onTap: _showDeleteDialog,
           ),
           const SizedBox(height: 12),
@@ -253,6 +264,8 @@ class _ProfilePageState extends State<ProfilePage> {
             icon: Icons.logout_rounded,
             label: 'Sign Out',
             iconColor: AppCol.btnbacks,
+            cardColor: cardColor,
+            shadowColor: shadowColor,
             onTap: () async {
               await _authService.signOut();
               if (!mounted) return;
@@ -338,13 +351,17 @@ class _ProfilePageState extends State<ProfilePage> {
     bool valueFaded = false,
     VoidCallback? onEdit,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = isDark ? const Color(0xFF1E2430) : Colors.white;
+    final titleColor = isDark ? Colors.white : AppCol.btnbacke;
+    final shadowColor = isDark ? Colors.black54 : Colors.black.withOpacity(0.05);
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: shadowColor,
               blurRadius: 8,
               offset: const Offset(0, 2))
         ],
@@ -370,9 +387,7 @@ class _ProfilePageState extends State<ProfilePage> {
             style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.bold,
-                color: valueFaded
-                    ? Colors.grey[400]
-                    : AppCol.btnbacke,
+                color: valueFaded ? Colors.grey[400] : titleColor,
                 fontStyle:
                     valueFaded ? FontStyle.italic : FontStyle.normal)),
         trailing: onEdit != null
@@ -388,15 +403,17 @@ class _ProfilePageState extends State<ProfilePage> {
     required IconData icon,
     required String label,
     required Color iconColor,
+    required Color cardColor,
+    required Color shadowColor,
     required VoidCallback onTap,
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: shadowColor,
               blurRadius: 8,
               offset: const Offset(0, 2))
         ],

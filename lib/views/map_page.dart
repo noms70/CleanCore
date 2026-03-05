@@ -212,6 +212,171 @@ class _MapPageState extends State<MapPage> {
                       myLocationEnabled: true,
                       myLocationButtonEnabled: false,
                       zoomControlsEnabled: false,
+                      style: Theme.of(context).brightness == Brightness.dark
+                          ? '''
+[
+  {
+    "elementType": "geometry",
+    "stylers": [
+      {
+        "color": "#242f3e"
+      }
+    ]
+  },
+  {
+    "elementType": "labels.text.fill",
+    "stylers": [
+      {
+        "color": "#746855"
+      }
+    ]
+  },
+  {
+    "elementType": "labels.text.stroke",
+    "stylers": [
+      {
+        "color": "#242f3e"
+      }
+    ]
+  },
+  {
+    "featureType": "administrative.locality",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      {
+        "color": "#d59563"
+      }
+    ]
+  },
+  {
+    "featureType": "poi",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      {
+        "color": "#d59563"
+      }
+    ]
+  },
+  {
+    "featureType": "poi.park",
+    "elementType": "geometry",
+    "stylers": [
+      {
+        "color": "#263c3f"
+      }
+    ]
+  },
+  {
+    "featureType": "poi.park",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      {
+        "color": "#6b9a76"
+      }
+    ]
+  },
+  {
+    "featureType": "road",
+    "elementType": "geometry",
+    "stylers": [
+      {
+        "color": "#38414e"
+      }
+    ]
+  },
+  {
+    "featureType": "road",
+    "elementType": "geometry.stroke",
+    "stylers": [
+      {
+        "color": "#212a37"
+      }
+    ]
+  },
+  {
+    "featureType": "road",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      {
+        "color": "#9ca5b3"
+      }
+    ]
+  },
+  {
+    "featureType": "road.highway",
+    "elementType": "geometry",
+    "stylers": [
+      {
+        "color": "#746855"
+      }
+    ]
+  },
+  {
+    "featureType": "road.highway",
+    "elementType": "geometry.stroke",
+    "stylers": [
+      {
+        "color": "#1f2835"
+      }
+    ]
+  },
+  {
+    "featureType": "road.highway",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      {
+        "color": "#f3d19c"
+      }
+    ]
+  },
+  {
+    "featureType": "transit",
+    "elementType": "geometry",
+    "stylers": [
+      {
+        "color": "#2f3948"
+      }
+    ]
+  },
+  {
+    "featureType": "transit.station",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      {
+        "color": "#d59563"
+      }
+    ]
+  },
+  {
+    "featureType": "water",
+    "elementType": "geometry",
+    "stylers": [
+      {
+        "color": "#17263c"
+      }
+    ]
+  },
+  {
+    "featureType": "water",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      {
+        "color": "#515c6d"
+      }
+    ]
+  },
+  {
+    "featureType": "water",
+    "elementType": "labels.text.stroke",
+    "stylers": [
+      {
+        "color": "#17263c"
+      }
+    ]
+  }
+]
+'''
+                          : null,
                       padding: const EdgeInsets.only(bottom: 10),
                     ),
 
@@ -230,10 +395,12 @@ class _MapPageState extends State<MapPage> {
                       child: FloatingActionButton.small(
                         heroTag: 'recenter_btn',
                         onPressed: _recenterMap,
-                        backgroundColor: Colors.white,
-                        child: const Icon(
+                        backgroundColor: Theme.of(context).cardColor,
+                        child: Icon(
                           Icons.my_location_rounded,
-                          color: AppCol.btnbacke,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white
+                              : AppCol.btnbacke,
                         ),
                       ),
                     ),
@@ -258,14 +425,16 @@ class _MapPageState extends State<MapPage> {
 
   Widget _buildRouteHeaderCard() {
     final criticalCount = _sortedBins.where((b) => b.isCritical).length;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.12),
+            color: isDark ? Colors.black54 : Colors.black.withOpacity(0.12),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -290,12 +459,12 @@ class _MapPageState extends State<MapPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Collection Route',
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
-                    color: AppCol.btnbacke,
+                    color: isDark ? Colors.white : AppCol.btnbacke,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -343,15 +512,17 @@ class _MapPageState extends State<MapPage> {
   }
 
   Widget _buildCollectionPanel() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black12,
+            color: isDark ? Colors.black38 : Colors.black12,
             blurRadius: 16,
-            offset: Offset(0, -4),
+            offset: const Offset(0, -4),
           ),
         ],
       ),
@@ -437,77 +608,64 @@ class _MapPageState extends State<MapPage> {
   }
 
   Widget _buildBinListItem(BinLocation bin, int stopNumber) {
-    final Color statusColor = bin.isCritical
-        ? Colors.red
-        : bin.fullness > 70
-            ? Colors.orange
-            : AppCol.btnbacks;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
         children: [
-          // Stop number badge
           Container(
-            width: 32,
-            height: 32,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.12),
+              color: isDark ? const Color(0xFF3D1F23) : const Color(0xFFFEECEE),
               shape: BoxShape.circle,
             ),
-            child: Center(
-              child: Text(
-                '$stopNumber',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                  color: statusColor,
-                ),
+            alignment: Alignment.center,
+            child: Text(
+              '$stopNumber',
+              style: const TextStyle(
+                color: Colors.red,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
               ),
             ),
           ),
-          const SizedBox(width: 12),
-
-          // Bin info
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   bin.id,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                    color: AppCol.btnbacke,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: isDark ? Colors.white : AppCol.btnbacke,
                   ),
                 ),
-                const SizedBox(height: 2),
                 Text(
                   bin.area,
                   style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
+                    color: isDark ? Colors.white54 : Colors.grey[600],
+                    fontSize: 13,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
-
-          // Fullness chip
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(20),
+              color: isDark ? const Color(0xFF3D1F23) : const Color(0xFFFEECEE),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: Text(
               '${bin.fullness}%',
-              style: TextStyle(
-                color: statusColor,
-                fontSize: 12,
+              style: const TextStyle(
+                color: Colors.red,
                 fontWeight: FontWeight.bold,
+                fontSize: 13,
               ),
             ),
           ),
