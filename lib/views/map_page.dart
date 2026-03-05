@@ -226,7 +226,7 @@ class _MapPageState extends State<MapPage> {
                     // ── Recenter FAB ─────────────────────────────────────
                     Positioned(
                       right: 16,
-                      bottom: 320,
+                      bottom: 400,
                       child: FloatingActionButton.small(
                         heroTag: 'recenter_btn',
                         onPressed: _recenterMap,
@@ -239,8 +239,10 @@ class _MapPageState extends State<MapPage> {
                     ),
 
                     // ── Bottom collection panel ───────────────────────────
-                    Align(
-                      alignment: Alignment.bottomCenter,
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 90, // sits just above the navbar
                       child: _buildCollectionPanel(),
                     ),
                   ],
@@ -342,7 +344,6 @@ class _MapPageState extends State<MapPage> {
 
   Widget _buildCollectionPanel() {
     return Container(
-      margin: const EdgeInsets.only(bottom: 88),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -416,18 +417,18 @@ class _MapPageState extends State<MapPage> {
             ),
           ),
 
-          // Bin list
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 180),
-            child: ListView.separated(
-              shrinkWrap: true,
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              itemCount: _sortedBins.length,
-              separatorBuilder: (_, __) => Divider(
-                height: 1,
-                color: Colors.grey.withOpacity(0.15),
-              ),
-              itemBuilder: (_, i) => _buildBinListItem(_sortedBins[i], i + 1),
+          // Bin list — plain Column so the panel hugs content with no empty gap
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (int i = 0; i < _sortedBins.length; i++) ...[
+                  if (i > 0)
+                    Divider(height: 1, color: Colors.grey.withOpacity(0.15)),
+                  _buildBinListItem(_sortedBins[i], i + 1),
+                ],
+              ],
             ),
           ),
         ],

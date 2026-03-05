@@ -1,4 +1,3 @@
-import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
 import '../utils/colors.dart';
 import '../widgets/navbar.dart';
@@ -14,117 +13,83 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool isNotificationsEnabled = true;
-  bool isBikeUsageTrackingEnabled = true;
+  bool _notifications = true;
+  bool _locationTracking = true;
 
   @override
   Widget build(BuildContext context) {
-    final Size screenSize = MediaQuery.of(context).size;
     return Scaffold(
-      appBar: AppBuild().buildAppBar(
-        title: 'Settings',
-        icon: Icons.settings_rounded,
-      ),
-      body: SafeArea(
-        child: Container(
-          decoration: const BoxDecoration(color: Color(0xFF141C40)),
-          child: Column(
-            children: [
-              Expanded(
-                child: Container(
-                  width: screenSize.width,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFFCF5FD),
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(35),
-                    ),
-                  ),
-                  child: ListView(
-                    padding: EdgeInsets.only(
-                      top: screenSize.width * 0.06,
-                      left: screenSize.width * 0.05,
-                      right: screenSize.width * 0.05,
-                      bottom: screenSize.width * 0.25,
-                    ),
-                    children: [
-                      _buildSectionHeader("Account"),
-                      _buildCard(
-                        child: _buildListTile(
-                          icon: Icons.person_rounded,
-                          title: "Personal Profile",
-                          subtitle: "View and edit your profile",
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const ProfilePage(),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildSectionHeader("Preferences"),
-                      _buildCard(
-                        child: Column(
-                          children: [
-                            _buildSwitchTile(
-                              icon: Icons.notifications_rounded,
-                              title: "Route Notifications",
-                              value: isNotificationsEnabled,
-                              onChanged: (value) {
-                                setState(() {
-                                  isNotificationsEnabled = value;
-                                });
-                              },
-                            ),
-                            Divider(
-                              color: Colors.grey.withOpacity(0.2),
-                              height: 1,
-                            ),
-                            _buildSwitchTile(
-                              icon: Icons.track_changes_rounded,
-                              title: "Location Tracking",
-                              value: isBikeUsageTrackingEnabled,
-                              onChanged: (value) {
-                                setState(() {
-                                  isBikeUsageTrackingEnabled = value;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildSectionHeader("About"),
-                      _buildCard(
-                        child: Column(
-                          children: [
-                            _buildListTile(
-                              icon: Icons.info_rounded,
-                              title: "App Version",
-                              subtitle: "1.0.0",
-                              onTap: () {},
-                            ),
-                            Divider(
-                              color: Colors.grey.withOpacity(0.2),
-                              height: 1,
-                            ),
-                            _buildListTile(
-                              icon: Icons.help_rounded,
-                              title: "Help & Support",
-                              subtitle: "Get assistance",
-                              onTap: () {},
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+      backgroundColor: const Color(0xFFF0F4F8),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        automaticallyImplyLeading: false,
+        title: const Text(
+          'Settings',
+          style: TextStyle(
+            color: AppCol.btnbacke,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
           ),
+        ),
+        centerTitle: true,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 28, 20, 40),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Account ────────────────────────────────────────────────
+            _sectionLabel('ACCOUNT'),
+            const SizedBox(height: 12),
+            _buildNavCard(
+              icon: Icons.person_rounded,
+              label: 'Personal Profile',
+              subtitle: 'View and edit your profile',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfilePage()),
+              ),
+            ),
+
+            const SizedBox(height: 28),
+
+            // ── Preferences ────────────────────────────────────────────
+            _sectionLabel('PREFERENCES'),
+            const SizedBox(height: 12),
+            _buildToggleCard(
+              icon: Icons.notifications_rounded,
+              label: 'Route Notifications',
+              value: _notifications,
+              onChanged: (v) => setState(() => _notifications = v),
+            ),
+            const SizedBox(height: 12),
+            _buildToggleCard(
+              icon: Icons.my_location_rounded,
+              label: 'Location Tracking',
+              value: _locationTracking,
+              onChanged: (v) => setState(() => _locationTracking = v),
+            ),
+
+            const SizedBox(height: 28),
+
+            // ── About ──────────────────────────────────────────────────
+            _sectionLabel('ABOUT'),
+            const SizedBox(height: 12),
+            _buildNavCard(
+              icon: Icons.info_rounded,
+              label: 'App Version',
+              subtitle: '1.0.0',
+              onTap: () {},
+            ),
+            const SizedBox(height: 12),
+            _buildNavCard(
+              icon: Icons.help_rounded,
+              label: 'Help & Support',
+              subtitle: 'Get assistance',
+              onTap: () {},
+            ),
+          ],
         ),
       ),
       bottomNavigationBar: NavBar(
@@ -134,121 +99,105 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildCard({required Widget child}) {
+  // ─── Widgets ─────────────────────────────────────────────────────────────
+
+  Widget _sectionLabel(String label) {
+    return Text(
+      label,
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 1.4,
+        color: AppCol.btnbacks,
+      ),
+    );
+  }
+
+  Widget _buildNavCard({
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: AppCol.btnbacks.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
         ],
       ),
-      child: child,
-    );
-  }
-
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 12, left: 4),
-      child: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
-          color: AppCol.btnbacke,
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildListTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Function() onTap,
-  }) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      leading: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              AppCol.btnbacks.withOpacity(0.15),
-              AppCol.btnbacks.withOpacity(0.05),
-            ],
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: AppCol.btnbacks.withOpacity(0.12),
+            shape: BoxShape.circle,
           ),
-          borderRadius: BorderRadius.circular(12),
+          child: Icon(icon, color: AppCol.btnbacks, size: 20),
         ),
-        child: Icon(icon, color: AppCol.btnbacks, size: 24),
+        title: Text(label,
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppCol.btnbacke)),
+        subtitle: Text(subtitle,
+            style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+        trailing: Icon(Icons.chevron_right_rounded,
+            color: AppCol.btnbacks.withOpacity(0.5)),
+        onTap: onTap,
       ),
-      title: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          color: AppCol.btntext,
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(fontSize: 13, color: Colors.black.withOpacity(0.5)),
-      ),
-      trailing: Icon(
-        Icons.arrow_forward_ios_rounded,
-        color: AppCol.btnbacks.withOpacity(0.6),
-        size: 18,
-      ),
-      onTap: onTap,
     );
   }
 
-  Widget _buildSwitchTile({
+  Widget _buildToggleCard({
     required IconData icon,
-    required String title,
+    required String label,
     required bool value,
-    required Function(bool) onChanged,
+    required ValueChanged<bool> onChanged,
   }) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      leading: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              AppCol.btnbacks.withOpacity(0.15),
-              AppCol.btnbacks.withOpacity(0.05),
-            ],
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2))
+        ],
+      ),
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: AppCol.btnbacks.withOpacity(0.12),
+            shape: BoxShape.circle,
           ),
-          borderRadius: BorderRadius.circular(12),
+          child: Icon(icon, color: AppCol.btnbacks, size: 20),
         ),
-        child: Icon(icon, color: AppCol.btnbacks, size: 24),
-      ),
-      title: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          color: AppCol.btntext,
+        title: Text(label,
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppCol.btnbacke)),
+        trailing: Switch(
+          value: value,
+          onChanged: onChanged,
+          activeColor: AppCol.btnbacks,
+          activeTrackColor: AppCol.btnbacks.withOpacity(0.3),
+          inactiveThumbColor: Colors.grey.shade400,
+          inactiveTrackColor: Colors.grey.shade200,
         ),
-      ),
-      trailing: Switch(
-        value: value,
-        onChanged: onChanged,
-        activeColor: AppCol.btnbacks,
-        activeTrackColor: AppCol.btnbacks.withOpacity(0.5),
-        inactiveThumbColor: Colors.grey.shade400,
-        inactiveTrackColor: Colors.grey.shade300,
       ),
     );
   }
