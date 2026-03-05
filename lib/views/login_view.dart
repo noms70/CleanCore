@@ -89,32 +89,7 @@ class _LoginViewState extends State<LoginView> {
     setState(() => _isLoading = false);
   }
 
-  Future<void> _googleSignIn() async {
-    setState(() => _isLoading = true);
 
-    final result = await _authService.signInWithGoogle(context);
-
-    if (!mounted) return;
-
-    if (result == null) {
-      // Success
-      showToast('Successfully logged in with Google.');
-       Navigator.pushReplacement(
-         context,
-         MaterialPageRoute(builder: (context) => const HomePage()),
-       );
-    } else {
-      // Failure
-      // Toast is already shown by AuthMethods, but we can show a generic one
-      if (result.isNotEmpty) {
-        showToast(result, isError: true);
-      }
-    }
-
-    if (mounted) {
-      setState(() => _isLoading = false);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -138,11 +113,6 @@ class _LoginViewState extends State<LoginView> {
             _buildSubmitButton(screenWidth),
             SizedBox(height: screenWidth * 0.02),
             // "Don't have an account?" is handled by the parent screen's header
-            _buildOrDivider(),
-            _buildSocialLoginButton(
-              logoPath: 'assets/Google.png',
-              onPressed: _googleSignIn,
-            ),
           ],
         ),
       ),

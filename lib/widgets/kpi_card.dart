@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cc/utils/colors.dart'; // Make sure this path is correct
+import 'package:cc/utils/colors.dart';
 
 class KpiCard extends StatelessWidget {
   final String label;
@@ -18,12 +18,21 @@ class KpiCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accentColor.withOpacity(0.2), width: 1),
+        gradient: LinearGradient(
+          colors: [Colors.white, accentColor.withOpacity(0.05)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accentColor.withOpacity(0.2), width: 1.5),
         boxShadow: [
+          BoxShadow(
+            color: accentColor.withOpacity(0.15),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
             blurRadius: 8,
@@ -37,31 +46,49 @@ class KpiCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: accentColor.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
+                  gradient: LinearGradient(
+                    colors: [
+                      accentColor.withOpacity(0.2),
+                      accentColor.withOpacity(0.1),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accentColor.withOpacity(0.2),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-                child: Icon(icon, color: accentColor, size: 20),
+                child: Icon(icon, color: accentColor, size: 22),
               ),
               const SizedBox(width: 12),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppCol.textGrey,
-                  fontWeight: FontWeight.w600,
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppCol.textGrey.withOpacity(0.8),
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           Text(
             value,
-            style: const TextStyle(
-              fontSize: 24,
+            style: TextStyle(
+              fontSize: 26,
               fontWeight: FontWeight.bold,
               color: AppCol.btntext,
+              letterSpacing: -0.5,
             ),
           ),
         ],

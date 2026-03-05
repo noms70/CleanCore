@@ -6,11 +6,10 @@ class NavBar extends StatelessWidget {
   final Function(String) onNavigate;
 
   const NavBar({Key? key, required this.currentPage, required this.onNavigate})
-      : super(key: key);
+    : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // --- 1. RESPONSIVE LOGIC (Same as before) ---
     final double screenWidth = MediaQuery.of(context).size.width;
     const double maxNavBarWidth = 500.0;
     const double mobileHorizontalPadding = 15.0;
@@ -21,7 +20,6 @@ class NavBar extends StatelessWidget {
     } else {
       horizontalPadding = mobileHorizontalPadding;
     }
-    // --- END RESPONSIVE LOGIC ---
 
     return Padding(
       padding: EdgeInsets.only(
@@ -29,83 +27,106 @@ class NavBar extends StatelessWidget {
         left: horizontalPadding,
         right: horizontalPadding,
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(40.0),
-        child: Container(
-          // Give the nav bar a consistent height
-          height: 70.0, // You can adjust this height
-          decoration: BoxDecoration(
-            color: AppCol.btnbacks,
+      child: Container(
+        height: 70.0,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(40.0),
+          gradient: LinearGradient(
+            colors: [AppCol.btnbacks, AppCol.btnbacks.withOpacity(0.9)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
           ),
-          // --- 2. LABELS + CENTERING FIX ---
-          // Use a Row for horizontal layout
+          boxShadow: [
+            BoxShadow(
+              color: AppCol.btnbacks.withOpacity(0.3),
+              blurRadius: 20,
+              offset: const Offset(0, 5),
+            ),
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(40.0),
           child: Row(
-            // Each item will be an 'Expanded' widget to take up equal space
             children: [
               _buildNavItem(
-                icon: Icons.home,
+                icon: Icons.home_rounded,
                 label: 'Home',
                 pageName: 'home',
               ),
               _buildNavItem(
-                icon: Icons.map,
+                icon: Icons.map_rounded,
                 label: 'Map',
                 pageName: 'Map',
               ),
               _buildNavItem(
-                icon: Icons.settings,
+                icon: Icons.settings_rounded,
                 label: 'Settings',
                 pageName: 'settings',
               ),
             ],
           ),
-          // --- END FIX ---
         ),
       ),
     );
   }
 
-  // --- 3. HELPER WIDGET ---
-  // We create a helper function to build each nav item.
-  // This avoids repeating code.
   Widget _buildNavItem({
     required IconData icon,
     required String label,
     required String pageName,
   }) {
-    // Check if this item is the currently selected one
     final bool isSelected = (currentPage == pageName);
+    final Color itemColor = isSelected
+        ? Colors.white
+        : Colors.white.withOpacity(0.5);
 
-    // Determine the color based on selection
-    final Color itemColor =
-        isSelected ? AppCol.btnbacke : AppCol.btnbacke.withOpacity(0.4);
-
-    // Expanded makes the widget fill 1/3 of the Row
     return Expanded(
-      child: InkWell(
-        // Use InkWell for tap effect
-        onTap: () => onNavigate(pageName),
-        // Make the splash effect match the icon color
-        splashColor: AppCol.btnbacke.withOpacity(0.1),
-        highlightColor: AppCol.btnbacke.withOpacity(0.1),
-        child: Column(
-          // Center the icon and text vertically
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              color: itemColor,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => onNavigate(pageName),
+          splashColor: Colors.white.withOpacity(0.1),
+          highlightColor: Colors.white.withOpacity(0.05),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            transform: Matrix4.identity()..scale(isSelected ? 1.0 : 0.95),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: EdgeInsets.all(isSelected ? 8 : 6),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.white.withOpacity(0.15)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: itemColor,
+                    size: isSelected ? 26 : 24,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: itemColor,
+                    fontSize: isSelected ? 13 : 12,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 4), // Space between icon and label
-            Text(
-              label,
-              style: TextStyle(
-                color: itemColor,
-                fontSize: 12, // Standard label font size
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

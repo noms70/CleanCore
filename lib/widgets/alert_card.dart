@@ -3,71 +3,102 @@ import 'package:cc/utils/colors.dart';
 import 'package:flutter/material.dart';
 
 class AlertCard extends StatelessWidget {
-  // 1. Add a field to hold the alert data
   final Alert alert;
 
-  // 2. Require the alert in the constructor
-  const AlertCard({
-    super.key,
-    required this.alert, // <-- This is new
-  });
+  const AlertCard({super.key, required this.alert});
 
-  // 3. This is the correct 'build' method that Flutter calls
   @override
   Widget build(BuildContext context) {
-    // Your UI logic goes here
+    // Modern color scheme based on alert type
+    Color backgroundColor;
+    Color borderColor;
+    Color iconColor;
+
+    switch (alert.type) {
+      case 'success':
+        backgroundColor = const Color(0xFFE8F5E9);
+        borderColor = const Color(0xFF4CAF50);
+        iconColor = const Color(0xFF2E7D32);
+        break;
+      case 'warning':
+        backgroundColor = const Color(0xFFFFF3E0);
+        borderColor = const Color(0xFFFF9800);
+        iconColor = const Color(0xFFF57C00);
+        break;
+      case 'error':
+        backgroundColor = const Color(0xFFFFEBEE);
+        borderColor = const Color(0xFFF44336);
+        iconColor = const Color(0xFFC62828);
+        break;
+      default: // info
+        backgroundColor = const Color(0xFFE3F2FD);
+        borderColor = AppCol.btnbacks;
+        iconColor = AppCol.accentDark;
+    }
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        // 4. Access the alert data using 'widget.alert' or just 'alert'
-        color: alert.type == 'success'
-            ? Colors.green.withOpacity(0.1)
-            : alert.type == 'warning'
-            ? Colors.orange.withOpacity(0.1)
-            : Colors.blue.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: alert.type == 'success'
-              ? Colors.green.withOpacity(0.3)
-              : alert.type == 'warning'
-              ? Colors.orange.withOpacity(0.3)
-              : Colors.blue.withOpacity(0.3),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            alert.icon,
-            color: alert.type == 'success'
-                ? Colors.green
-                : alert.type == 'warning'
-                ? Colors.orange
-                : Colors.blue,
-            size: 20,
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor.withOpacity(0.3), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: borderColor.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            // Optional: Add tap interaction
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
               children: [
-                Text(
-                  alert.title,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: AppCol.btntext,
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: iconColor.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  child: Icon(alert.icon, color: iconColor, size: 22),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  alert.message,
-                  style: const TextStyle(fontSize: 12, color: AppCol.textGrey),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        alert.title,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppCol.btntext,
+                          height: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        alert.message,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppCol.textGrey.withOpacity(0.8),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }

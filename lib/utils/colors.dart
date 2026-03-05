@@ -28,6 +28,16 @@ class AppCol {
 
   static const Color appbg = Colors.teal;
 
+  // Modern surface colors for cards and elevated elements
+  static const Color cardSurface = Color(0xFFFFFFFF);
+  static const Color cardSurfaceLight = Color(0xFFFCF5FD);
+  static const Color backgroundLight = Color(0xFFF8F9FA);
+
+  // Enhanced accent colors
+  static const Color accentPrimary = Color(0xFF00D9D9);
+  static const Color accentSecondary = Color(0xFF2AF598);
+  static const Color accentDark = Color(0xFF048A7E);
+
   static const LinearGradient headerback = LinearGradient(
     colors: [Color(0xFFF5F0F8), AppCol.btnbacks, Color(0xFF141C40)],
     stops: [0.18, 0.5, 1],
@@ -52,6 +62,21 @@ class AppCol {
     colors: [Color(0xFF2AF5AE), Color(0xFF048A7E)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
+  );
+
+  // Modern card gradient
+  static const LinearGradient cardGradient = LinearGradient(
+    colors: [Color(0xFF00E5E5), Color(0xFF00A8A8)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  // Shimmer gradient for loading states
+  static const LinearGradient shimmerGradient = LinearGradient(
+    colors: [Color(0xFFE0E0E0), Color(0xFFF5F5F5), Color(0xFFE0E0E0)],
+    stops: [0.0, 0.5, 1.0],
+    begin: Alignment(-1.0, 0.0),
+    end: Alignment(1.0, 0.0),
   );
 }
 
