@@ -1,15 +1,19 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:cc/models/user_model.dart';
 import 'package:cc/services/auth_service.dart';
 import 'package:cc/services/firestore_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cc/utils/colors.dart';
-import '../widgets/navbar.dart';
-import './settings_page.dart';
-import '../widgets/alert_card.dart';
-import './map_page.dart';
 import '../models/models.dart';
-import 'dart:convert';
-import 'package:cc/models/user_model.dart';
-import 'dart:math'; // Required for the Circular Progress Bar calculations
+import '../widgets/alert_card.dart';
+import '../widgets/navbar.dart';
+import './map_page.dart';
+import './settings_page.dart';
 
 // =========================================================================
 // 1. **FIXED ERROR:** ProgressPainter must be a top-level class.
@@ -81,17 +85,23 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
   UserModel? _user;
 
   // Driver information
   String currentStatus = 'Offline';
 
-  // Route data
-  int completedBins = 12;
-  int totalBins = 45;
-  String routeId = 'Route 4B';
-  String estimatedTime = '2h 35m';
-  int criticalBinsNearby = 3;
+  // Route data — populated from Firestore 'routes' collection
+  int completedBins = 0;
+  int totalBins = 0;
+  String routeId = '—';
+  String estimatedTime = '—';
+  int criticalBinsNearby = 0;
+  double estimatedFuel = 0.0;
+
+  // Firestore subscriptions
+  StreamSubscription<QuerySnapshot>? _routeSub;
+  StreamSubscription<QuerySnapshot>? _binsSub;
 
   // Map markers and locations
   final List<BinLocation> binLocations = [
@@ -179,6 +189,72 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _initializeUserData();
+    _subscribeToRouteData();
+    _subscribeToBinStats();
+  }
+
+  @override
+  void dispose() {
+    _routeSub?.cancel();
+    _binsSub?.cancel();
+    super.dispose();
+  }
+
+  /// Listen to the driver's active route in Firestore.
+  /// Field 'driverId' matches what the backend writes (not 'workerId').
+  void _subscribeToRouteData() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _routeSub = _db
+        .collection('routes')
+        .where('driverId', isEqualTo: uid)
+        .where('status', isEqualTo: 'active')
+        .limit(1)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      if (snap.docs.isEmpty) {
+        setState(() {
+          completedBins = 0;
+          totalBins = 0;
+          routeId = 'No active route';
+          estimatedFuel = 0.0;
+          currentStatus = 'Idle';
+        });
+        return;
+      }
+      final route = ActiveRoute.fromFirestore(snap.docs.first);
+      setState(() {
+        completedBins = route.completedStops;
+        totalBins = route.totalStops;
+        routeId = route.routeId.length > 12
+            ? route.routeId.substring(0, 12) + '…'
+            : route.routeId;
+        estimatedFuel = route.estimatedFuel;
+        currentStatus = 'On Route';
+        // Rough ETA: assume 2 min per remaining stop
+        final remaining = route.totalStops - route.completedStops;
+        final mins = remaining * 2;
+        estimatedTime = mins >= 60
+            ? '${mins ~/ 60}h ${mins % 60}m'
+            : '${mins}m';
+      });
+    });
+  }
+
+  /// Count critical bins from Firestore (fillLevel > 89 or status critical/full).
+  void _subscribeToBinStats() {
+    _binsSub = _db.collection('bins').snapshots().listen((snap) {
+      if (!mounted) return;
+      final critical = snap.docs.where((d) {
+        final data = d.data();
+        final fill = (data['fillLevel'] ?? data['fill_level'] ?? 0) as num;
+        final status = (data['status'] ?? '').toString().toLowerCase();
+        return fill >= 90 || status == 'critical' || status == 'full';
+      }).length;
+      setState(() => criticalBinsNearby = critical);
+    });
   }
 
   void _initializeUserData() async {
@@ -543,7 +619,7 @@ class _HomePageState extends State<HomePage> {
                 AppCol.btnbacks,
               ),
               _buildMetricCard(
-                'Est. Completion',
+                'Est. Remaining',
                 estimatedTime,
                 Icons.schedule,
                 Colors.orange,
@@ -555,9 +631,9 @@ class _HomePageState extends State<HomePage> {
                 Colors.red,
               ),
               _buildMetricCard(
-                'Total Bins',
-                '$totalBins Bins',
-                Icons.pin_drop,
+                'Fuel Est.',
+                '${estimatedFuel.toStringAsFixed(1)} L',
+                Icons.local_gas_station,
                 AppCol.ngt,
               ),
             ],

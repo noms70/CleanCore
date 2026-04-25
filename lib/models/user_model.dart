@@ -6,7 +6,10 @@ class UserModel {
   final String firstName;
   final String lastName;
   final String profilePicture;
-  final String? phoneNumber; // Optional
+  final String? phoneNumber;
+  /// Role values match the backend exactly: 'worker', 'admin', 'manager'
+  final String role;
+  final String status; // 'active' | 'inactive'
   final Timestamp createdAt;
 
   UserModel({
@@ -16,10 +19,14 @@ class UserModel {
     required this.lastName,
     required this.profilePicture,
     this.phoneNumber,
+    this.role = 'worker',
+    this.status = 'active',
     required this.createdAt,
   });
 
-  /// Helper function to convert a UserModel instance into a Map (for writing to Firestore).
+  bool get isWorker => role == 'worker';
+  bool get isAdmin => role == 'admin' || role == 'manager';
+
   Map<String, dynamic> toMap() {
     return {
       'uid': uid,
@@ -28,21 +35,24 @@ class UserModel {
       'lastName': lastName,
       'profilePicture': profilePicture,
       'phoneNumber': phoneNumber,
+      'role': role,
+      'status': status,
       'createdAt': createdAt,
     };
   }
 
-  /// Helper function to create a UserModel instance from a Firestore DocumentSnapshot.
   factory UserModel.fromDocument(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return UserModel(
-      uid: data['uid'] ?? doc.id,
-      email: data['email'] ?? '',
-      firstName: data['firstName'] ?? '',
-      lastName: data['lastName'] ?? '',
-      profilePicture: data['profilePicture'] ?? '',
-      phoneNumber: data['phoneNumber'], // Can be null
-      createdAt: data['createdAt'] ?? Timestamp.now(),
+      uid: data['uid'] as String? ?? doc.id,
+      email: data['email'] as String? ?? '',
+      firstName: data['firstName'] as String? ?? '',
+      lastName: data['lastName'] as String? ?? '',
+      profilePicture: data['profilePicture'] as String? ?? '',
+      phoneNumber: data['phoneNumber'] as String?,
+      role: data['role'] as String? ?? 'worker',
+      status: data['status'] as String? ?? 'active',
+      createdAt: data['createdAt'] as Timestamp? ?? Timestamp.now(),
     );
   }
 }
