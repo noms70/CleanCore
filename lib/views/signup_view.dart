@@ -105,13 +105,12 @@ class _SignupViewState extends State<SignupView> {
       if (!mounted) return;
 
       if (isVerified) {
-        showToast("Registration successful! Welcome");
-        // Navigator.pushReplacement(
-        //   context,
-        //   MaterialPageRoute(builder: (context) => const HomePage()),
-        // );
-      } else {
-        showToast("Verification failed or cancelled.", isError: true);
+        showToast("Registration successful! Welcome", isError: false);
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const HomePage()),
+          (route) => false,
+        );
       }
       
     } else {
@@ -282,36 +281,38 @@ Widget _buildPasswordField(double screenWidth) {
   }
 
   Widget _buildSubmitButton(double screenWidth) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [AppCol.btnbacks, AppCol.btnbacke],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(30),
-      ),
+    final screenHeight = MediaQuery.of(context).size.height;
+    return SizedBox(
+      width: double.infinity,
       child: ElevatedButton(
         onPressed: _isLoading ? null : _signup,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.transparent,
+          backgroundColor: AppCol.appbodye,
           foregroundColor: AppCol.white,
-          shadowColor: Colors.transparent,
+          elevation: 4,
+          shadowColor: AppCol.appbodye.withOpacity(0.4),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(30),
+            borderRadius: BorderRadius.circular(16),
           ),
           padding: EdgeInsets.symmetric(
-            horizontal: screenWidth * 0.3,
-            vertical: 20,
+            vertical: screenHeight * 0.022,
           ),
         ),
         child: _isLoading
-            ? CircularProgressIndicator(color: AppCol.white)
+            ? const SizedBox(
+                height: 22,
+                width: 22,
+                child: CircularProgressIndicator(
+                  color: AppCol.white,
+                  strokeWidth: 2.5,
+                ),
+              )
             : Text(
                 'Sign up',
                 style: TextStyle(
                   fontSize: screenWidth * 0.045,
                   fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
                 ),
               ),
       ),

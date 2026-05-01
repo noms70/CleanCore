@@ -10,10 +10,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cc/utils/colors.dart';
 import '../models/models.dart';
-import '../widgets/alert_card.dart';
 import '../widgets/navbar.dart';
 import './map_page.dart';
 import './settings_page.dart';
+import '../widgets/inactivity_wrapper.dart';
 
 // =========================================================================
 // 1. **FIXED ERROR:** ProgressPainter must be a top-level class.
@@ -103,79 +103,12 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<QuerySnapshot>? _routeSub;
   StreamSubscription<QuerySnapshot>? _binsSub;
 
-  // Map markers and locations
-  final List<BinLocation> binLocations = [
-    BinLocation(
-      id: 'BIN_ISB_001',
-      lat: 33.72962, // Faisal Mosque
-      lng: 73.03702,
-      fullness: 92,
-      isCritical: true,
-      area: 'Faisal Mosque Area',
-      status: 'Critical',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_ISB_002',
-      lat: 33.69333, // Pakistan Monument
-      lng: 73.06822,
-      fullness: 45,
-      isCritical: false,
-      area: 'Pakistan Monument',
-      status: 'Normal',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_ISB_003',
-      lat: 33.7400, // Daman-e-Koh
-      lng: 73.0600,
-      fullness: 98,
-      isCritical: true,
-      area: 'Daman-e-Koh Viewpoint',
-      status: 'Critical',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_ISB_004',
-      lat: 33.7077, // Centaurus Mall
-      lng: 73.0499,
-      fullness: 35,
-      isCritical: false,
-      area: 'Centaurus Mall',
-      status: 'Normal',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_ISB_005',
-      lat: 33.70293, // Rawal Lake
-      lng: 73.12771,
-      fullness: 88,
-      isCritical: true,
-      area: 'Rawal Lake Park',
-      status: 'Critical',
-      capacity: 240,
-    ),
-  ];
+  // Bins are loaded live from Firestore inside MapPage — no hardcoded data here.
+  final List<BinLocation> binLocations = [];
 
-  // Map-related state
-  double driverLat = 33.7077; // Centered at Centaurus
-  double driverLng = 73.0499;
-
-  // Alerts - **REMOVED from UI, kept for data structure**
-  List<Alert> alerts = [
-    Alert(
-      title: 'New Bin Urgency Detected',
-      message: 'Route recalculated for better efficiency',
-      type: 'info',
-      icon: Icons.route,
-    ),
-    Alert(
-      title: 'Anomaly #123 Resolved',
-      message: 'Admin confirmed issue closure',
-      type: 'success',
-      icon: Icons.check_circle,
-    ),
-  ];
+  // Driver position — updated by live GPS stream in MapPage.
+  double driverLat = 52.5200; // Berlin centre fallback
+  double driverLng = 13.4050;
 
   String currentPage = 'home';
 
@@ -243,14 +176,28 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  /// Count critical bins from Firestore (fillLevel > 89 or status critical/full).
+  /// Count critical bins in the worker's assigned area from Firestore.
   void _subscribeToBinStats() {
     _binsSub = _db.collection('bins').snapshots().listen((snap) {
       if (!mounted) return;
+      final workerArea = _user?.assignedArea ?? '';
+      final workerWaste = (_user?.assignedWasteType ?? '').toLowerCase();
+
       final critical = snap.docs.where((d) {
         final data = d.data();
-        final fill = (data['fillLevel'] ?? data['fill_level'] ?? 0) as num;
+        final fill   = (data['fillLevel'] ?? data['fill_level'] ?? 0) as num;
         final status = (data['status'] ?? '').toString().toLowerCase();
+
+        // Scope to worker's area/waste type once profile is loaded
+        if (workerArea.isNotEmpty) {
+          final binArea = (data['area'] ?? data['sector'] ?? '').toString();
+          if (binArea != workerArea) return false;
+        }
+        if (workerWaste.isNotEmpty) {
+          final binWaste = (data['wasteType'] ?? data['type'] ?? '').toString().toLowerCase();
+          if (binWaste != workerWaste) return false;
+        }
+
         return fill >= 90 || status == 'critical' || status == 'full';
       }).length;
       setState(() => criticalBinsNearby = critical);
@@ -443,70 +390,76 @@ class _HomePageState extends State<HomePage> {
     // --- THIS IS NOW THE MAIN PAGE ROUTER ---
 
     if (currentPage == 'settings') {
-      return SettingsPage(
-        onNavigate: (page) {
-          setState(() {
-            currentPage = page;
-          });
-        },
+      return InactivityWrapper(
+        child: SettingsPage(
+          onNavigate: (page) {
+            setState(() {
+              currentPage = page;
+            });
+          },
+        ),
       );
     }
 
     if (currentPage == 'Map') {
-      return MapPage(
-        binLocations: binLocations,
-        driverLat: driverLat,
-        driverLng: driverLng,
-        currentPage: currentPage,
-        onNavigate: (page) {
-          setState(() {
-            currentPage = page;
-          });
-        },
+      return InactivityWrapper(
+        child: MapPage(
+          binLocations: binLocations,
+          driverLat: driverLat,
+          driverLng: driverLng,
+          currentPage: currentPage,
+          onNavigate: (page) {
+            setState(() {
+              currentPage = page;
+            });
+          },
+        ),
       );
     }
 
     // --- ELSE, SHOW THE HOME PAGE ---
     final screenSize = MediaQuery.of(context).size;
 
-    return Scaffold(
-      extendBody: true,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(40)),
-        ),
-        backgroundColor: AppCol.btnbacks,
-        elevation: 0,
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 50, bottom: 10),
-                child: Center(
-                  child: Image.asset(
-                    'assets/cc_logo.png',
-                    height: 100,
-                    fit: BoxFit.contain,
+    return InactivityWrapper(
+      child: Scaffold(
+        extendBody: true,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(40)),
+          ),
+          backgroundColor: AppCol.btnbacks,
+          elevation: 0,
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 50, bottom: 10),
+                  child: Center(
+                    child: Image.asset(
+                      'assets/cc_logo.png',
+                      height: 100,
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 48), // Spacer to balance the layout
-          ],
+              const SizedBox(width: 48), // Spacer to balance the layout
+            ],
+          ),
         ),
-      ),
-      body: _buildHomePageContent(
-        screenSize,
-      ), // <-- USE NEW HOME CONTENT METHOD
-      bottomNavigationBar: NavBar(
-        currentPage: currentPage,
-        onNavigate: (page) {
-          setState(() {
-            currentPage = page;
-          });
-        },
+        body: _buildHomePageContent(
+          screenSize,
+        ), // <-- USE NEW HOME CONTENT METHOD
+        bottomNavigationBar: NavBar(
+          currentPage: currentPage,
+          onNavigate: (page) {
+            setState(() {
+              currentPage = page;
+            });
+          },
+        ),
       ),
     );
   }

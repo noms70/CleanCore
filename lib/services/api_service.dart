@@ -1,35 +1,56 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 /// Central service for all calls to the FastAPI backend.
 ///
+/// Web:              uses localhost (same machine as the browser).
 /// Android emulator: use 10.0.2.2 (maps to the host machine's localhost).
 /// Physical device:  replace with your PC's LAN IP, e.g. 192.168.1.5
 class ApiService {
-  static const String _base = 'http://10.0.2.2:8000';
+  static const String _base = kIsWeb
+      ? 'http://localhost:8000'
+      : 'http://192.168.1.67:8000';
 
   // ── 1. Analyze bin image ──────────────────────────────────────────────────
   // Field name MUST be "image_file" — matches FastAPI's parameter name exactly.
   // bin_id, lat, lng are passed as query params so the backend writes them to
   // the Firestore 'bins' document alongside fillLevel and wasteType.
+  //
+  // Accepts raw bytes + filename so it works on both web and mobile.
   Future<Map<String, dynamic>?> analyzeBin({
-    required File imageFile,
-    required String binId,
+    List<int>? imageBytes,
+    String? imageName,
+    File? imageFile,   // legacy mobile-only param
+    String? binId,     // optional — for display only, not sent to backend
     required double lat,
     required double lng,
   }) async {
     try {
       final uri = Uri.parse('$_base/analyze/').replace(queryParameters: {
-        'bin_id': binId,
         'lat': lat.toString(),
         'lng': lng.toString(),
       });
 
       final request = http.MultipartRequest('POST', uri);
-      request.files.add(
-        await http.MultipartFile.fromPath('image_file', imageFile.path),
-      );
+
+      if (imageBytes != null) {
+        // Works on both web and mobile
+        request.files.add(http.MultipartFile.fromBytes(
+          'image_file',
+          imageBytes,
+          filename: imageName ?? 'capture.jpg',
+        ));
+      } else if (!kIsWeb && imageFile != null) {
+        // Mobile-only fallback
+        request.files.add(
+          await http.MultipartFile.fromPath('image_file', imageFile.path),
+        );
+      } else {
+        _log('analyzeBin', 0, 'No image provided');
+        return null;
+      }
 
       final streamed = await request.send();
       final response = await http.Response.fromStream(streamed);
@@ -73,19 +94,21 @@ class ApiService {
   }
 
   // ── 3. Complete a collection stop ─────────────────────────────────────────
-  // Field names: route_id and bin_id (match backend exactly).
-  // Backend increments completedStops and resets bin fillLevel to 0.
+  // Backend increments completedStops, marks stop completed, resets bin, and
+  // writes a pickupLog document for analytics.
   Future<Map<String, dynamic>?> completeStop({
     required String routeId,
     required String binId,
+    String workerId = '',
   }) async {
     try {
       final response = await http.post(
         Uri.parse('$_base/complete-stop'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
-          'route_id': routeId,
-          'bin_id': binId,
+          'route_id':  routeId,
+          'bin_id':    binId,
+          'worker_id': workerId,
         }),
       );
       if (response.statusCode == 200) {
@@ -99,7 +122,57 @@ class ApiService {
     }
   }
 
-  // ── 4. Report anomaly (broken bin / blocked road) ─────────────────────────
+  // ── 4. Generate optimized route for worker ───────────────────────────────
+  // Calls POST /optimize-route. Backend loads worker's assignedArea +
+  // assignedWasteType from Firestore and runs the VRP algorithm.
+  // depot_lat/lng should be the worker's current GPS so the first stop is
+  // ordered from their actual position.
+  Future<Map<String, dynamic>?> optimizeRoute({
+    required String workerId,
+    double depotLat = 0.0,
+    double depotLng = 0.0,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_base/optimize-route'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'worker_id': workerId,
+          'depot_lat': depotLat,
+          'depot_lng': depotLng,
+        }),
+      );
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      _log('optimizeRoute', response.statusCode, response.body);
+      return null;
+    } catch (e) {
+      _log('optimizeRoute', 0, e.toString());
+      return null;
+    }
+  }
+
+  // ── 5. Fetch worker's current active route ────────────────────────────────
+  // Calls GET /worker/my-route/{worker_id}
+  // Returns the full route document including ordered stops list.
+  Future<Map<String, dynamic>?> getMyRoute({required String workerId}) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_base/worker/my-route/$workerId'),
+      );
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      _log('getMyRoute', response.statusCode, response.body);
+      return null;
+    } catch (e) {
+      _log('getMyRoute', 0, e.toString());
+      return null;
+    }
+  }
+
+  // ── 5. Report anomaly (broken bin / blocked road) ─────────────────────────
   Future<bool> reportAnomaly({
     required String binId,
     required String anomalyType,

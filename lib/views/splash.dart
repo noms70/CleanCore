@@ -1,5 +1,7 @@
-import 'package:cc/views/auth/auth_landing_screen.dart'; // MODIFIED: Point to auth screen
+import 'package:cc/views/auth/auth_landing_screen.dart';
+import 'package:cc/views/home_page.dart';
 import 'package:cc/utils/colors.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 
@@ -24,12 +26,19 @@ class _SplashScreenState extends State<SplashScreen>
     _initializeFadeAnimation();
     _fadeController?.forward(); // Start animation immediately
 
-    // Navigate to AuthLandingScreen after 3 seconds
+    // After 3 seconds check existing session; skip login if already authenticated.
     Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
+      if (!mounted) return;
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null && user.emailVerified) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const AuthLandingScreen()),
+          MaterialPageRoute(builder: (_) => const HomePage()),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const AuthLandingScreen()),
         );
       }
     });

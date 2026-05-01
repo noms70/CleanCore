@@ -28,30 +28,66 @@ class CustomTextFormField extends StatelessWidget {
     final screenWidth = MediaQuery.of(context).size.width;
 
     return Padding(
-      padding: EdgeInsets.only(bottom: screenWidth * 0.05), // Dynamic spacing
-      child: Row(
-        children: [
-          Icon(icon, color: AppCol.btntext, size: screenWidth * 0.07),
-          SizedBox(width: screenWidth * 0.02),
-          Expanded(
-            child: TextFormField(
-              controller: controller,
-              obscureText: obscureText,
-              keyboardType: keyboardType,
-              decoration: InputDecoration(
-                labelText: labelText,
-                labelStyle: TextStyle(fontSize: screenWidth * 0.04),
-                hintText: hintText,
-                hintStyle: TextStyle(
-                  fontSize: screenWidth * 0.035,
-                  color: Colors.grey[500],
-                ),
-                suffixIcon: suffixIcon,
-              ),
-              validator: validator,
+      padding: EdgeInsets.only(bottom: screenWidth * 0.05),
+      child: TextFormField(
+        controller: controller,
+        obscureText: obscureText,
+        keyboardType: keyboardType,
+        style: TextStyle(
+          fontSize: screenWidth * 0.04,
+          fontWeight: FontWeight.w500,
+        ),
+        decoration: InputDecoration(
+          filled: true,
+          fillColor: Colors.grey[50],
+          labelText: labelText,
+          labelStyle: TextStyle(
+            fontSize: screenWidth * 0.038,
+            color: Colors.grey[600],
+            fontWeight: FontWeight.w500,
+          ),
+          hintText: hintText,
+          hintStyle: TextStyle(
+            fontSize: screenWidth * 0.035,
+            color: Colors.grey[400],
+          ),
+          prefixIcon: Icon(
+            icon,
+            color: AppCol.appbodye,
+            size: 22,
+          ),
+          suffixIcon: suffixIcon,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide(
+              color: Colors.grey[200]!,
+              width: 1.5,
             ),
           ),
-        ],
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(
+              color: AppCol.appbodye,
+              width: 2,
+            ),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide(
+              color: Colors.red[400]!,
+              width: 1.5,
+            ),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide(
+              color: Colors.red[400]!,
+              width: 2,
+            ),
+          ),
+        ),
+        validator: validator,
       ),
     );
   }

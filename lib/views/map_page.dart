@@ -11,10 +11,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:cc/utils/colors.dart';
 import '../models/models.dart';
 import '../widgets/navbar.dart';
+import './route_job_screen.dart';
 
 class MapPage extends StatefulWidget {
   final String currentPage;
@@ -45,9 +47,13 @@ class _MapPageState extends State<MapPage> {
   CameraPosition? _initialPosition;
   bool _isLoading = true;
 
-  // ── Bin data (live from Firestore) ────────────────────────────────────────
+  // ── Bin data (live from Firestore — filtered by worker assignment) ───────
   List<BinLocation> _bins = [];
   BinLocation? _selectedBin;
+
+  // Worker assignment — loaded once from Firestore so the bin query can filter
+  String _assignedArea = '';
+  String _assignedWasteType = '';
 
   // ── Active route (live from Firestore 'routes' collection) ────────────────
   ActiveRoute? _activeRoute;
@@ -75,9 +81,9 @@ class _MapPageState extends State<MapPage> {
   void initState() {
     super.initState();
     _polylinePoints = PolylinePoints(apiKey: '');
-    _bins = List.from(widget.binLocations); // show static data immediately
+    _bins = List.from(widget.binLocations);
     _setupMap();
-    _subscribeToBins();
+    _loadProfileThenSubscribeToBins(); // loads assignment filters first
     _subscribeToActiveRoute();
   }
 
@@ -110,22 +116,55 @@ class _MapPageState extends State<MapPage> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  // ── Firestore: live bin updates ───────────────────────────────────────────
+  // ── Firestore: load worker profile then subscribe to filtered bins ────────
+  // Workers only see bins in their assignedArea + assignedWasteType so they
+  // are not overwhelmed with irrelevant stops on the map.
+  Future<void> _loadProfileThenSubscribeToBins() async {
+    if (_uid != null) {
+      try {
+        final doc = await _db.collection('users').doc(_uid).get();
+        if (doc.exists) {
+          final d = doc.data()!;
+          _assignedArea      = (d['assignedArea']      as String? ?? '').trim();
+          _assignedWasteType = (d['assignedWasteType'] as String? ?? '').trim();
+        }
+      } catch (_) {}
+    }
+    _subscribeToBins();
+  }
+
+  // ── Firestore: live bin updates (filtered by worker assignment) ───────────
   void _subscribeToBins() {
     _binsSub = _db.collection('bins').snapshots().listen((snap) {
-      final live = snap.docs
-          .where((d) {
-            final data = d.data();
-            // Only show bins that have GPS coordinates
-            return (data['lat'] != null && data['lng'] != null) ||
-                data['location'] is GeoPoint;
-          })
-          .map((d) => BinLocation.fromFirestore(d))
-          .toList();
+      final live = snap.docs.where((d) {
+        final data = d.data();
+
+        // Must have GPS coordinates
+        if (data['lat'] == null && data['lng'] == null &&
+            data['location'] is! GeoPoint) return false;
+
+        // Filter: only bins in the worker's assigned district
+        if (_assignedArea.isNotEmpty) {
+          final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
+          if (binArea != _assignedArea) return false;
+        }
+
+        // Filter: only bins matching the worker's assigned waste stream
+        if (_assignedWasteType.isNotEmpty) {
+          final binWaste =
+              (data['wasteType'] ?? data['waste_type'] ?? data['type'] ?? '')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+          if (binWaste != _assignedWasteType.toLowerCase()) return false;
+        }
+
+        return true;
+      }).map((d) => BinLocation.fromFirestore(d)).toList();
 
       if (mounted) {
         setState(() {
-          _bins = live.isNotEmpty ? live : widget.binLocations;
+          _bins = live;
           _generateMarkers();
         });
       }
@@ -148,6 +187,32 @@ class _MapPageState extends State<MapPage> {
           _activeRoute = snap.docs.isNotEmpty
               ? ActiveRoute.fromFirestore(snap.docs.first)
               : null;
+              
+          _polylines.clear();
+          if (_activeRoute != null && _activeRoute!.stops.isNotEmpty) {
+            List<LatLng> points = [];
+            if (_currentPosition != null) {
+              points.add(LatLng(_currentPosition!.latitude, _currentPosition!.longitude));
+            }
+            
+            // Add remaining uncollected stops to the polyline
+            final uncollectedStops = _activeRoute!.stops;
+            for (var stop in uncollectedStops) {
+              points.add(LatLng(stop.lat, stop.lng));
+            }
+
+            if (points.length > 1) {
+              _polylines.add(
+                Polyline(
+                  polylineId: const PolylineId('active_route'),
+                  points: points,
+                  color: AppCol.btnbacks,
+                  width: 5,
+                  patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+                ),
+              );
+            }
+          }
         });
       }
     });
@@ -278,6 +343,18 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
+  // ── Open stop in Google Maps via geo: deep link ───────────────────────────
+  Future<void> _openInGoogleMaps(BinLocation bin) async {
+    final uri      = Uri.parse('geo:${bin.lat},${bin.lng}?q=${bin.lat},${bin.lng}');
+    final fallback = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=${bin.lat},${bin.lng}');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      await launchUrl(fallback, mode: LaunchMode.externalApplication);
+    }
+  }
+
   // ── Mark bin as collected ─────────────────────────────────────────────────
   // Calls POST /complete-stop with route_id and bin_id.
   // Backend increments completedStops and resets fillLevel to 0.
@@ -285,16 +362,18 @@ class _MapPageState extends State<MapPage> {
     if (_activeRoute == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('No active route. Ask your admin to generate one first.'),
+          content: Text('No active route. Tap "My Route" to generate one first.'),
           backgroundColor: Colors.orange,
+          duration: Duration(seconds: 3),
         ),
       );
       return;
     }
 
     final result = await _api.completeStop(
-      routeId: _activeRoute!.routeId,
-      binId: bin.id,
+      routeId:  _activeRoute!.routeId,
+      binId:    bin.id,
+      workerId: _uid ?? '',
     );
 
     if (!mounted) return;
@@ -331,8 +410,12 @@ class _MapPageState extends State<MapPage> {
     setState(() => _scanning = true);
     Navigator.pop(context); // close bottom sheet while scanning
 
+    // Read image bytes (works on both web and mobile)
+    final bytes = await picked.readAsBytes();
+
     final result = await _api.analyzeBin(
-      imageFile: File(picked.path),
+      imageBytes: bytes,
+      imageName: picked.name,
       binId: bin.id,
       lat: bin.lat,
       lng: bin.lng,
@@ -404,149 +487,147 @@ class _MapPageState extends State<MapPage> {
         ),
       ),
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Row(
-            children: [
-              const Text(
-                'Bin Details',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: AppCol.btntext,
-                ),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: const Icon(Icons.close, size: 28),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          _detailRow('ID', bin.id),
-          const SizedBox(height: 10),
-          _detailRow('Area / Type', bin.wasteType),
-          const SizedBox(height: 10),
-          _detailRow('Status', bin.status.toUpperCase()),
-          const SizedBox(height: 10),
-          _detailRow('Fill Level', '${bin.fullness}%'),
-          const SizedBox(height: 10),
-
-          // Fill progress bar
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-              value: bin.fullness / 100,
-              minHeight: 8,
-              backgroundColor: AppCol.btnbacks.withOpacity(0.2),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                bin.isCritical ? Colors.red : AppCol.btnbacks,
-              ),
-            ),
-          ),
-
-          // Active route badge
-          if (_activeRoute != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green.withOpacity(0.4)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.route, size: 14, color: Colors.green),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Route active · ${_activeRoute!.completedStops}/${_activeRoute!.totalStops} done',
-                    style: const TextStyle(fontSize: 12, color: Colors.green),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
-          const SizedBox(height: 20),
-
-          // Action buttons
-          if (isBusy)
-            const Center(child: CircularProgressIndicator(color: AppCol.btnbacks))
-          else
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
               children: [
-                // Navigate to bin
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _createPolyline(bin);
-                  },
-                  icon: const Icon(Icons.navigation),
-                  label: const Text('Navigate to Bin'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppCol.btnbacks,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                const Text(
+                  'Bin Details',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: AppCol.btntext,
                   ),
                 ),
-                const SizedBox(height: 8),
-
-                // Scan bin (POST /analyze/)
-                OutlinedButton.icon(
-                  onPressed: () => _scanBin(bin),
-                  icon: const Icon(Icons.camera_alt_outlined),
-                  label: const Text('Scan Bin with AI'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppCol.btnbacks,
-                    side: BorderSide(color: AppCol.btnbacks),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                // Mark collected (POST /complete-stop)
-                ElevatedButton.icon(
-                  onPressed: () => _markCollected(bin),
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Mark as Collected'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                // Report anomaly (POST /report-anomaly)
-                TextButton.icon(
-                  onPressed: () => _reportAnomaly(bin),
-                  icon: const Icon(Icons.warning_amber_rounded,
-                      color: Colors.orange),
-                  label: const Text(
-                    'Report Anomaly',
-                    style: TextStyle(color: Colors.orange),
-                  ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: const Icon(Icons.close, size: 28),
                 ),
               ],
             ),
-        ],
+            const SizedBox(height: 16),
+
+            _detailRow('ID', bin.id),
+            const SizedBox(height: 10),
+            _detailRow('Area / Type', bin.wasteType),
+            const SizedBox(height: 10),
+            _detailRow('Status', _getStatusText(bin.fullness)),
+            const SizedBox(height: 10),
+            _detailRow('Fill Level', '${bin.fullness}%'),
+            const SizedBox(height: 10),
+
+            // Fill progress bar
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: bin.fullness / 100,
+                minHeight: 8,
+                backgroundColor: AppCol.btnbacks.withOpacity(0.2),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  bin.isCritical ? Colors.red : AppCol.btnbacks,
+                ),
+              ),
+            ),
+
+            // Active route badge
+            if (_activeRoute != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.withOpacity(0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.route, size: 14, color: Colors.green),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Route active · ${_activeRoute!.completedStops}/${_activeRoute!.totalStops} done',
+                      style: const TextStyle(fontSize: 12, color: Colors.green),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 20),
+
+            // Action buttons
+            if (isBusy)
+              const Center(child: CircularProgressIndicator(color: AppCol.btnbacks))
+            else
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Show Route Plan on Map
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _focusOnRoute();
+                    },
+                    icon: const Icon(Icons.navigation_outlined),
+                    label: const Text('Show Route Plan on Map'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppCol.btnbacks,
+                      side: BorderSide(color: AppCol.btnbacks),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Scan bin (POST /analyze/)
+                  OutlinedButton.icon(
+                    onPressed: () => _scanBin(bin),
+                    icon: const Icon(Icons.camera_alt_outlined),
+                    label: const Text('Scan Bin with AI'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppCol.btnbacks,
+                      side: BorderSide(color: AppCol.btnbacks),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Complete Collection (POST /complete-stop)
+                  ElevatedButton.icon(
+                    onPressed: () => _markCollected(bin),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Complete Collection'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Report Issue (POST /report-anomaly)
+                  TextButton.icon(
+                    onPressed: () => _reportAnomaly(bin),
+                    icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                    label: const Text('Report Issue', style: TextStyle(color: Colors.orange)),
+                  ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -555,20 +636,35 @@ class _MapPageState extends State<MapPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label,
-            style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: AppCol.textGrey)),
+        Text(label, style: const TextStyle(color: AppCol.textGrey, fontSize: 14)),
         Flexible(
-          child: Text(value,
-              textAlign: TextAlign.end,
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: AppCol.btntext)),
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: const TextStyle(fontWeight: FontWeight.w600, color: AppCol.btntext, fontSize: 14),
+          ),
         ),
       ],
+    );
+  }
+
+  String _getStatusText(int fullness) {
+    if (fullness <= 30) return 'EMPTY';
+    if (fullness <= 70) return 'NORMAL';
+    if (fullness < 90) return 'FULL';
+    return 'OVERFLOW';
+  }
+
+  void _focusOnRoute() {
+    if (_activeRoute == null || _activeRoute!.stops.isEmpty) return;
+    
+    final points = _activeRoute!.stops.map((s) => LatLng(s.lat, s.lng)).toList();
+    if (_currentPosition != null) {
+      points.add(LatLng(_currentPosition!.latitude, _currentPosition!.longitude));
+    }
+    
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(_bounds(points), 50),
     );
   }
 
@@ -662,8 +758,23 @@ class _MapPageState extends State<MapPage> {
                         onPressed: _recenterMap,
                         backgroundColor: Colors.white,
                         mini: true,
-                        child: const Icon(Icons.my_location,
-                            color: AppCol.btntext),
+                        child: const Icon(Icons.my_location, color: AppCol.btntext),
+                      ),
+                    ),
+
+                    // My Route FAB — opens RouteJobScreen
+                    Positioned(
+                      right: 16,
+                      bottom: 300,
+                      child: FloatingActionButton.extended(
+                        heroTag: 'my_route_btn',
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const RouteJobScreen()),
+                        ),
+                        backgroundColor: AppCol.btnbacks,
+                        icon: const Icon(Icons.list_alt, color: Colors.white),
+                        label: const Text('My Route', style: TextStyle(color: Colors.white, fontSize: 12)),
                       ),
                     ),
 
