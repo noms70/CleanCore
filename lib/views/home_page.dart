@@ -107,8 +107,8 @@ class _HomePageState extends State<HomePage> {
   final List<BinLocation> binLocations = [];
 
   // Driver position — updated by live GPS stream in MapPage.
-  double driverLat = 52.5200; // Berlin centre fallback
-  double driverLng = 13.4050;
+  double driverLat = 33.6938; // G-9 Islamabad fallback
+  double driverLng = 73.0651;
 
   String currentPage = 'home';
 
@@ -482,7 +482,7 @@ class _HomePageState extends State<HomePage> {
 
   // --- NEW: Circular Progress Bar for Route Completion ---
   Widget _buildCircularProgressSection(Size screenSize) {
-    final progress = completedBins / totalBins;
+    final progress = totalBins == 0 ? 0.0 : completedBins / totalBins;
     final progressPercentage = (progress * 100).toStringAsFixed(0);
 
     return Center(

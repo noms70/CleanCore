@@ -58,6 +58,11 @@ class _MapPageState extends State<MapPage> {
   // ── Active route (live from Firestore 'routes' collection) ────────────────
   ActiveRoute? _activeRoute;
 
+  // ── Urgent bin alert ──────────────────────────────────────────────────────
+  // Tracks bins we've already shown an alert for (prevents repeat alerts)
+  final Set<String> _notifiedUrgentBins = {};
+  BinLocation? _urgentAlertBin; // currently shown alert, null = no alert
+
   // ── Services ─────────────────────────────────────────────────────────────
   final _api = ApiService();
   final _db = FirebaseFirestore.instance;
@@ -66,6 +71,7 @@ class _MapPageState extends State<MapPage> {
   // ── Subscriptions ─────────────────────────────────────────────────────────
   StreamSubscription<QuerySnapshot>? _binsSub;
   StreamSubscription<QuerySnapshot>? _routeSub;
+  StreamSubscription<QuerySnapshot>? _urgentSub;
   StreamSubscription<Position>? _locationSub;
 
   // ── Location ──────────────────────────────────────────────────────────────
@@ -85,12 +91,14 @@ class _MapPageState extends State<MapPage> {
     _setupMap();
     _loadProfileThenSubscribeToBins(); // loads assignment filters first
     _subscribeToActiveRoute();
+    _subscribeToUrgentBins();
   }
 
   @override
   void dispose() {
     _binsSub?.cancel();
     _routeSub?.cancel();
+    _urgentSub?.cancel();
     _locationSub?.cancel();
     _mapController?.dispose();
     super.dispose();
@@ -143,9 +151,10 @@ class _MapPageState extends State<MapPage> {
         if (data['lat'] == null && data['lng'] == null &&
             data['location'] is! GeoPoint) return false;
 
-        // Filter: only bins in the worker's assigned district
+        // Filter: only bins in the worker's assigned district.
         if (_assignedArea.isNotEmpty) {
           final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
+          // Strict filter: if worker has an area, bin MUST match it.
           if (binArea != _assignedArea) return false;
         }
 
@@ -214,6 +223,47 @@ class _MapPageState extends State<MapPage> {
             }
           }
         });
+      }
+    });
+  }
+
+  // ── Urgent bin real-time alert ─────────────────────────────────────────────
+  // Listens for bins with fillLevel >= 90 that are not yet locked to a route.
+  // When a new one appears in the worker's area, shows an alert banner.
+  void _subscribeToUrgentBins() {
+    if (_uid == null) return;
+    _urgentSub = _db
+        .collection('bins')
+        .where('fillLevel', isGreaterThanOrEqualTo: 90)
+        .where('isLocked', isEqualTo: false)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      for (final doc in snap.docChanges) {
+        // Only react to newly added or modified-to-urgent bins
+        if (doc.type == DocumentChangeType.added ||
+            doc.type == DocumentChangeType.modified) {
+          final binId = doc.doc.id;
+          if (_notifiedUrgentBins.contains(binId)) continue;
+
+          // Filter by worker's assigned area (empty area = accept all)
+          final data = doc.doc.data() as Map<String, dynamic>;
+          final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
+          if (_assignedArea.isNotEmpty &&
+              binArea.isNotEmpty &&
+              binArea != _assignedArea) continue;
+
+          _notifiedUrgentBins.add(binId);
+          final urgent = BinLocation.fromFirestore(doc.doc);
+          setState(() => _urgentAlertBin = urgent);
+          // Auto-dismiss after 10 seconds
+          Future.delayed(const Duration(seconds: 10), () {
+            if (mounted && _urgentAlertBin?.id == binId) {
+              setState(() => _urgentAlertBin = null);
+            }
+          });
+          break; // show one at a time
+        }
       }
     });
   }
@@ -416,7 +466,10 @@ class _MapPageState extends State<MapPage> {
     final result = await _api.analyzeBin(
       imageBytes: bytes,
       imageName: picked.name,
-      binId: bin.id,
+      binId: bin.id,                  // updates existing Firestore doc
+      area: _assignedArea.isNotEmpty  // keeps bin in the worker's routing pool
+          ? _assignedArea
+          : bin.area,
       lat: bin.lat,
       lng: bin.lng,
     );
@@ -443,25 +496,90 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  // ── Report anomaly ────────────────────────────────────────────────────────
+  // ── Report anomaly with type picker ─────────────────────────────────────
   Future<void> _reportAnomaly(BinLocation bin) async {
     if (_uid == null) return;
-    Navigator.pop(context);
+    Navigator.pop(context); // close bin sheet first
+
+    const types = [
+      {'key': 'broken_bin',   'label': 'Broken Bin',      'priority': 'high'},
+      {'key': 'blocked_road', 'label': 'Blocked Road',     'priority': 'high'},
+      {'key': 'overflowing',  'label': 'Overflowing',      'priority': 'high'},
+      {'key': 'inaccessible', 'label': 'Inaccessible',     'priority': 'medium'},
+      {'key': 'vandalism',    'label': 'Vandalism/Damage', 'priority': 'medium'},
+      {'key': 'other',        'label': 'Other Issue',      'priority': 'low'},
+    ];
+
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text('Report Issue',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 2),
+            Text(
+              'Bin ${bin.id.length > 12 ? '${bin.id.substring(0, 12)}…' : bin.id}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            ...types.map((t) => ListTile(
+              leading: Icon(
+                Icons.warning_amber_rounded,
+                color: t['priority'] == 'high'
+                    ? Colors.red
+                    : t['priority'] == 'medium'
+                        ? Colors.orange
+                        : Colors.grey,
+              ),
+              title: Text(t['label'] as String),
+              dense: true,
+              onTap: () => Navigator.pop(ctx, t),
+            )),
+          ],
+        ),
+      ),
+    );
+
+    if (selected == null || !mounted) return;
 
     final success = await _api.reportAnomaly(
-      binId: bin.id,
-      anomalyType: 'broken_bin',
-      reportedBy: _uid!,
-      sector: bin.area,
-      priority: 'high',
+      binId:       bin.id,
+      anomalyType: selected['key'] as String,
+      reportedBy:  _uid!,
+      sector:      bin.area,
+      priority:    selected['priority'] as String,
     );
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(success ? 'Anomaly reported.' : 'Failed to report anomaly.'),
+        content: Text(success
+            ? 'Issue reported: ${selected['label']}'
+            : 'Failed to report issue.'),
         backgroundColor: success ? Colors.orange : Colors.red,
       ),
+    );
+  }
+
+  // ── Check if a bin is a completed stop on the active route ──────────────
+  bool _isBinCompleted(String binId) {
+    if (_activeRoute == null) return false;
+    return _activeRoute!.stops.any(
+      (s) => s.binId == binId && s.completed,
     );
   }
 
@@ -516,7 +634,10 @@ class _MapPageState extends State<MapPage> {
             const SizedBox(height: 10),
             _detailRow('Area / Type', bin.wasteType),
             const SizedBox(height: 10),
-            _detailRow('Status', _getStatusText(bin.fullness)),
+            _detailRow(
+              'Status',
+              _isBinCompleted(bin.id) ? 'COMPLETED' : _getStatusText(bin.fullness),
+            ),
             const SizedBox(height: 10),
             _detailRow('Fill Level', '${bin.fullness}%'),
             const SizedBox(height: 10),
@@ -534,8 +655,33 @@ class _MapPageState extends State<MapPage> {
               ),
             ),
 
-            // Active route badge
-            if (_activeRoute != null) ...[
+            // Completed badge — shown when this bin is a done stop on the active route
+            if (_isBinCompleted(bin.id)) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.green.shade300),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green.shade600, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Collected — this stop is done',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (_activeRoute != null) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -602,14 +748,24 @@ class _MapPageState extends State<MapPage> {
                   ),
                   const SizedBox(height: 8),
 
-                  // Complete Collection (POST /complete-stop)
+                  // Mark Complete (disabled if already done)
                   ElevatedButton.icon(
-                    onPressed: () => _markCollected(bin),
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Complete Collection'),
+                    onPressed: _isBinCompleted(bin.id) ? null : () => _markCollected(bin),
+                    icon: Icon(
+                      _isBinCompleted(bin.id)
+                          ? Icons.check_circle
+                          : Icons.check_circle_outline,
+                    ),
+                    label: Text(
+                      _isBinCompleted(bin.id) ? 'Already Completed' : 'Mark Complete',
+                    ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
+                      backgroundColor: _isBinCompleted(bin.id)
+                          ? Colors.grey.shade300
+                          : Colors.green,
+                      foregroundColor: _isBinCompleted(bin.id)
+                          ? Colors.grey.shade600
+                          : Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
@@ -618,11 +774,20 @@ class _MapPageState extends State<MapPage> {
                   ),
                   const SizedBox(height: 8),
 
-                  // Report Issue (POST /report-anomaly)
-                  TextButton.icon(
+                  // Report Issue
+                  OutlinedButton.icon(
                     onPressed: () => _reportAnomaly(bin),
                     icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
-                    label: const Text('Report Issue', style: TextStyle(color: Colors.orange)),
+                    label: const Text('Report Issue',
+                        style: TextStyle(color: Colors.orange)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.orange,
+                      side: BorderSide(color: Colors.orange.withOpacity(0.6)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -836,6 +1001,99 @@ class _MapPageState extends State<MapPage> {
                                     color: AppCol.btnbacks),
                               ),
                             ],
+                          ),
+                        ),
+                      ),
+
+                    // Urgent bin alert banner (slides in below route banner)
+                    if (_urgentAlertBin != null)
+                      Positioned(
+                        top: MediaQuery.of(context).padding.top +
+                            (_activeRoute != null ? 72 : 8),
+                        left: 16,
+                        right: 16,
+                        child: Material(
+                          elevation: 6,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade700,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.warning_amber_rounded,
+                                    color: Colors.white, size: 22),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text(
+                                        'Urgent Pickup Needed!',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Bin ${_urgentAlertBin!.id.length > 14 ? '${_urgentAlertBin!.id.substring(0, 14)}…' : _urgentAlertBin!.id} '
+                                        'is overflowing (${_urgentAlertBin!.fullness}%). '
+                                        'Ready to collect!',
+                                        style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                // Navigate to bin on map
+                                GestureDetector(
+                                  onTap: () {
+                                    final bin = _urgentAlertBin!;
+                                    setState(() => _urgentAlertBin = null);
+                                    _mapController?.animateCamera(
+                                      CameraUpdate.newCameraPosition(
+                                        CameraPosition(
+                                          target: LatLng(bin.lat, bin.lng),
+                                          zoom: 16,
+                                        ),
+                                      ),
+                                    );
+                                    _showBinDetails(bin);
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Text(
+                                      'View',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                // Dismiss
+                                GestureDetector(
+                                  onTap: () =>
+                                      setState(() => _urgentAlertBin = null),
+                                  child: const Icon(Icons.close,
+                                      color: Colors.white70, size: 18),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),

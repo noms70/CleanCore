@@ -3,35 +3,41 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
+// ── BACKEND URL CONFIG ────────────────────────────────────────────────────────
+// Change _deviceBase before running on a physical device.
+//   Android emulator → '10.0.2.2'   (maps to host machine localhost)
+//   Physical device  → your PC's LAN IP (run `ipconfig` on Windows / `ifconfig` on Mac)
+//   Example: 'http://192.168.1.67:8000'
+const String _deviceBase = 'http://192.168.1.67:8000';
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Central service for all calls to the FastAPI backend.
-///
-/// Web:              uses localhost (same machine as the browser).
-/// Android emulator: use 10.0.2.2 (maps to the host machine's localhost).
-/// Physical device:  replace with your PC's LAN IP, e.g. 192.168.1.5
 class ApiService {
   static const String _base = kIsWeb
       ? 'http://localhost:8000'
-      : 'http://192.168.1.67:8000';
+      : _deviceBase;
 
   // ── 1. Analyze bin image ──────────────────────────────────────────────────
   // Field name MUST be "image_file" — matches FastAPI's parameter name exactly.
-  // bin_id, lat, lng are passed as query params so the backend writes them to
-  // the Firestore 'bins' document alongside fillLevel and wasteType.
-  //
-  // Accepts raw bytes + filename so it works on both web and mobile.
+  // binId: if given, backend UPDATES that existing doc (preserves isLocked/routeId).
+  // area:  worker's assignedArea, so scanned bins stay in the right routing pool.
   Future<Map<String, dynamic>?> analyzeBin({
     List<int>? imageBytes,
     String? imageName,
-    File? imageFile,   // legacy mobile-only param
-    String? binId,     // optional — for display only, not sent to backend
+    File? imageFile,    // legacy mobile-only param
+    String? binId,      // existing Firestore bin ID to update (not create)
+    String? area,       // worker's assignedArea
     required double lat,
     required double lng,
   }) async {
     try {
-      final uri = Uri.parse('$_base/analyze/').replace(queryParameters: {
+      final params = <String, String>{
         'lat': lat.toString(),
         'lng': lng.toString(),
-      });
+        if (binId != null && binId.isNotEmpty) 'bin_id': binId,
+        if (area != null && area.isNotEmpty) 'area': area,
+      };
+      final uri = Uri.parse('$_base/analyze/').replace(queryParameters: params);
 
       final request = http.MultipartRequest('POST', uri);
 
@@ -113,6 +119,9 @@ class ApiService {
       );
       if (response.statusCode == 200) {
         return json.decode(response.body) as Map<String, dynamic>;
+      }
+      if (response.statusCode == 409) {
+        return {'error': 'already_completed'};
       }
       _log('completeStop', response.statusCode, response.body);
       return null;

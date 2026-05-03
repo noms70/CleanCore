@@ -55,15 +55,9 @@ class BinLocation {
     final rawStatus = (data['status'] ?? '').toString().toLowerCase();
     final critical = fill >= 90 || rawStatus == 'critical' || rawStatus == 'full';
 
-    // ── Area label: prefer sector, fall back to wasteType or legacy 'name' ──
-    String areaLabel;
-    if (data['sector'] != null && data['sector'].toString().isNotEmpty) {
-      areaLabel = data['sector'].toString();
-    } else if (wt.isNotEmpty && wt != 'Unknown') {
-      areaLabel = wt;
-    } else {
-      areaLabel = (data['name'] ?? 'Unknown').toString();
-    }
+    // ── Area label: backend writes 'area'; legacy docs may use 'sector' ─────
+    final rawArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
+    final areaLabel = rawArea.isNotEmpty ? rawArea : (data['name'] ?? 'Unknown').toString();
 
     return BinLocation(
       id:         doc.id,

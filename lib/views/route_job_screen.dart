@@ -5,8 +5,10 @@ import 'package:cc/services/api_service.dart';
 import 'package:cc/utils/colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Displays the worker's current active route as an ordered job list.
@@ -29,26 +31,34 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
   ActiveRoute? _route;
+  ActiveRoute? _completedRoute;  // most recent completed route for this driver
   bool _loading = true;
   String? _error;
 
   // Tracks which stops are currently being submitted to avoid double-taps
   final Set<String> _busyBins = {};
 
+  // AI scan state per stop
+  final Map<String, Map<String, dynamic>> _scanResults = {};
+  final Set<String> _scanningBins = {};
+
   bool _generating = false;
   String? _genError;
 
   StreamSubscription<QuerySnapshot>? _routeSub;
+  StreamSubscription<QuerySnapshot>? _completedRouteSub;
 
   @override
   void initState() {
     super.initState();
     _subscribeToRoute();
+    _subscribeToCompletedRoute();
   }
 
   @override
   void dispose() {
     _routeSub?.cancel();
+    _completedRouteSub?.cancel();
     super.dispose();
   }
 
@@ -80,22 +90,97 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
     });
   }
 
+  /// Subscribes to the most recent completed route for this driver.
+  /// When all stops are done and the route is marked 'completed' by the backend,
+  /// this surfaces the completion screen instead of the generic "No Active Route".
+  void _subscribeToCompletedRoute() {
+    if (_uid == null) return;
+    _completedRouteSub = _db
+        .collection('routes')
+        .where('driverId', isEqualTo: _uid)
+        .where('status', isEqualTo: 'completed')
+        .orderBy('completedAt', descending: true)
+        .limit(1)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() {
+        _completedRoute = snap.docs.isNotEmpty
+            ? ActiveRoute.fromFirestore(snap.docs.first)
+            : null;
+      });
+    });
+  }
+
   /// Calls POST /optimize-route to generate the worker's route on demand.
-  /// The VRP algorithm filters bins by the worker's assignedArea and
-  /// assignedWasteType from Firestore, so the worker only gets relevant stops.
+  ///
+  /// Depot origin priority:
+  ///   1. Live GPS (works on Android emulator / physical device)
+  ///   2. Last known GPS position (emulator fallback)
+  ///   3. Worker's stored lat/lng from Firestore (Chrome / web fallback)
+  ///
+  /// Area filtering is always done server-side using the worker's assignedArea
+  /// field — GPS is only used to order stops nearest-first from the depot.
   Future<void> _generateRoute() async {
     if (_uid == null) return;
     setState(() { _generating = true; _genError = null; });
 
-    // Use current GPS as depot origin so the nearest stop comes first
     double depotLat = 0.0, depotLng = 0.0;
-    try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      ).timeout(const Duration(seconds: 6));
-      depotLat = pos.latitude;
-      depotLng = pos.longitude;
-    } catch (_) {}
+
+    if (kIsWeb) {
+      // ── Web / Chrome: geolocator hangs waiting for browser permission and
+      // Dart's timeout does not reliably interrupt it on web. Skip GPS and
+      // use the worker's stored depot coordinates from Firestore directly.
+      try {
+        final workerDoc = await _db.collection('users').doc(_uid!).get();
+        if (workerDoc.exists) {
+          final data = workerDoc.data() ?? {};
+          depotLat = (data['lat'] as num?)?.toDouble() ?? 0.0;
+          depotLng = (data['lng'] as num?)?.toDouble() ?? 0.0;
+        }
+      } catch (_) {
+        // Firestore read failed — stays (0,0), caught below
+      }
+    } else {
+      // ── Native (Android emulator / physical device): use live GPS ──────────
+      Position? pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        ).timeout(const Duration(seconds: 8));
+      } catch (_) {
+        pos = await Geolocator.getLastKnownPosition();
+      }
+      if (pos != null && !(pos.latitude == 0.0 && pos.longitude == 0.0)) {
+        depotLat = pos.latitude;
+        depotLng = pos.longitude;
+      } else {
+        // GPS timed out — fall back to Firestore stored coords
+        try {
+          final workerDoc = await _db.collection('users').doc(_uid!).get();
+          if (workerDoc.exists) {
+            final data = workerDoc.data() ?? {};
+            depotLat = (data['lat'] as num?)?.toDouble() ?? 0.0;
+            depotLng = (data['lng'] as num?)?.toDouble() ?? 0.0;
+          }
+        } catch (_) {
+          // Firestore read failed — stays (0,0), caught below
+        }
+      }
+    }
+
+    // ── Step 3: If both GPS and Firestore coords are (0,0), inform the user ──
+    if (depotLat == 0.0 && depotLng == 0.0) {
+      if (!mounted) return;
+      setState(() {
+        _generating = false;
+        _genError = 'Could not determine your location.\n'
+            '• On emulator: open Extended Controls → Location, '
+            'set lat=33.6938 lng=73.0651, tap Set Location, then retry.\n'
+            '• On Chrome: make sure your worker profile has valid coordinates.';
+      });
+      return;
+    }
 
     final result = await _api.optimizeRoute(
       workerId: _uid!,
@@ -142,15 +227,28 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
     setState(() => _busyBins.remove(stop.binId));
 
     if (result != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Bin ${stop.binId} collected! '
-            '${result['completed_stops']}/${result['total_stops']} stops done.',
+      if (result['error'] == 'already_completed') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This stop is already marked as completed.'),
+            backgroundColor: Colors.orange,
           ),
-          backgroundColor: Colors.green,
-        ),
-      );
+        );
+        return;
+      }
+      if (result['route_status'] == 'completed') {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _showCompletionSummary());
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Bin ${stop.binId} collected! '
+              '${result['completed_stops']}/${result['total_stops']} stops done.',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -164,35 +262,258 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
   Future<void> _reportIssue(RouteStop stop) async {
     if (_uid == null) return;
 
-    final confirm = await showDialog<bool>(
+    const types = [
+      {'key': 'broken_bin',   'label': 'Broken Bin',      'priority': 'high'},
+      {'key': 'blocked_road', 'label': 'Blocked Road',     'priority': 'high'},
+      {'key': 'overflowing',  'label': 'Overflowing',      'priority': 'high'},
+      {'key': 'inaccessible', 'label': 'Inaccessible',     'priority': 'medium'},
+      {'key': 'vandalism',    'label': 'Vandalism/Damage', 'priority': 'medium'},
+      {'key': 'other',        'label': 'Other Issue',      'priority': 'low'},
+    ];
+
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Report Issue'),
-        content: Text('Report a problem with bin ${stop.binId}?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Report', style: TextStyle(color: Colors.orange)),
-          ),
-        ],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(height: 14),
+            const Text('Report Issue', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 2),
+            Text(
+              'Bin ${stop.binId.length > 12 ? '${stop.binId.substring(0, 12)}…' : stop.binId}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            ...types.map((t) => ListTile(
+              leading: Icon(Icons.warning_amber_rounded,
+                color: t['priority'] == 'high' ? Colors.red : t['priority'] == 'medium' ? Colors.orange : Colors.grey),
+              title: Text(t['label'] as String),
+              dense: true,
+              onTap: () => Navigator.pop(ctx, t),
+            )),
+          ],
+        ),
       ),
     );
-    if (confirm != true || !mounted) return;
+
+    if (selected == null || !mounted) return;
 
     final success = await _api.reportAnomaly(
       binId:       stop.binId,
-      anomalyType: 'field_issue',
+      anomalyType: selected['key'] as String,
       reportedBy:  _uid!,
       sector:      stop.area,
-      priority:    'high',
+      priority:    selected['priority'] as String,
     );
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(success ? 'Issue reported.' : 'Failed to report issue.'),
+        content: Text(success ? 'Issue reported: ${selected['label']}' : 'Failed to report issue.'),
         backgroundColor: success ? Colors.orange : Colors.red,
+      ),
+    );
+  }
+
+  Future<void> _scanBin(RouteStop stop) async {
+    if (_scanningBins.contains(stop.binId)) return;
+    try {
+      final photo = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        imageQuality: 80,
+        maxWidth: 1024,
+      );
+      if (photo == null || !mounted) return;
+
+      setState(() => _scanningBins.add(stop.binId));
+
+      final bytes  = await photo.readAsBytes();
+      final result = await _api.analyzeBin(
+        imageBytes: bytes,
+        imageName:  'bin_${stop.binId}.jpg',
+        lat:        stop.lat,
+        lng:        stop.lng,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _scanningBins.remove(stop.binId);
+        if (result != null) _scanResults[stop.binId] = result;
+      });
+
+      if (result == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('AI scan failed. Check connection and try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _scanningBins.remove(stop.binId));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Camera error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  void _showCompletionSummary() {
+    if (_route == null || !mounted) return;
+    final route = _route!;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+        title: Column(
+          children: [
+            Container(
+              width: 64, height: 64,
+              decoration: BoxDecoration(color: Colors.green.shade50, shape: BoxShape.circle),
+              child: Icon(Icons.check_circle_rounded, color: Colors.green.shade600, size: 40),
+            ),
+            const SizedBox(height: 12),
+            const Text('Route Complete!',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+            const SizedBox(height: 4),
+            Text('Great work today!',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontWeight: FontWeight.normal)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Divider(height: 24),
+            _summaryRow(Icons.check_circle_outline, 'Stops Collected',   '${route.totalStops}'),
+            _summaryRow(Icons.straighten,            'Distance Driven',   '${route.totalDistanceKm} km'),
+            _summaryRow(Icons.eco,                   'CO₂ Footprint',     '${route.carbonFootprintKg.toStringAsFixed(2)} kg'),
+            _summaryRow(Icons.local_gas_station,     'Fuel Estimated',    '${route.estimatedFuel.toStringAsFixed(1)} L'),
+            _summaryRow(Icons.location_city,         'Area',
+              route.assignedArea.isNotEmpty ? route.assignedArea : 'All Areas'),
+            _summaryRow(Icons.recycling,             'Waste Stream',
+              route.assignedWasteType.isNotEmpty ? route.assignedWasteType : 'All Types'),
+            const SizedBox(height: 16),
+          ],
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Great Work!', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: AppCol.btnbacks),
+          const SizedBox(width: 10),
+          Text(label, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+          const Spacer(),
+          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScanResult(String binId) {
+    final result = _scanResults[binId];
+    if (result == null) return const SizedBox.shrink();
+
+    final results    = (result['results'] as Map<String, dynamic>?) ?? {};
+    final fillLevel  = (results['fill_level'] as Map<String, dynamic>?) ?? {};
+    final fillValue  = fillLevel['value'] as int? ?? 0;
+    final fillStatus = fillLevel['status'] as String? ?? 'Unknown';
+    final confidence = ((fillLevel['confidence'] as num?) ?? 0).toDouble();
+
+    final wasteDetected = results['waste_detected'] as List<dynamic>? ?? [];
+    final primaryWaste  = wasteDetected.isNotEmpty
+        ? ((wasteDetected.first as Map<String, dynamic>)['type'] as String? ?? 'Unknown')
+        : 'Unknown';
+
+    final fillColor = fillValue >= 90 ? Colors.red
+        : fillValue >= 70 ? Colors.orange
+        : Colors.green;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.teal.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.teal.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.smart_toy_outlined, size: 13, color: Colors.teal.shade700),
+              const SizedBox(width: 4),
+              Text('AI Scan',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700)),
+              const Spacer(),
+              Text('${(confidence * 100).toStringAsFixed(0)}% confidence',
+                style: TextStyle(fontSize: 11, color: Colors.teal.shade600)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: fillColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: fillColor.withOpacity(0.4)),
+                ),
+                child: Text('$fillStatus · $fillValue%',
+                  style: TextStyle(fontSize: 11, color: fillColor, fontWeight: FontWeight.bold)),
+              ),
+              if (primaryWaste != 'Unknown') ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Text(primaryWaste,
+                    style: TextStyle(fontSize: 11, color: Colors.blue.shade700)),
+                ),
+              ],
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -214,7 +535,9 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
           : _error != null
               ? _buildError()
               : _route == null
-                  ? _buildNoRoute()
+                  ? (_completedRoute != null
+                      ? _buildAllDoneScreen(_completedRoute!)
+                      : _buildNoRoute())
                   : _buildRouteContent(),
     );
   }
@@ -232,6 +555,149 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Shown when the worker has no active route but has a recently completed one.
+  Widget _buildAllDoneScreen(ActiveRoute done) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 32),
+          // Trophy / checkmark
+          Container(
+            width: 96, height: 96,
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.green.shade200, width: 2),
+            ),
+            child: Icon(Icons.check_circle_rounded,
+                color: Colors.green.shade500, size: 56),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'All Stops Completed!',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: AppCol.btntext,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Great work today! You have successfully collected all '
+            '${done.totalStops} bins on your route.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 28),
+
+          // Summary stats card
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppCol.btnbacks, Color(0xFF00A896)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: AppCol.btnbacks.withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                _doneStatRow(Icons.check_circle_outline,
+                    'Bins Collected', '${done.totalStops}'),
+                const Divider(color: Colors.white24, height: 20),
+                _doneStatRow(Icons.straighten,
+                    'Distance Driven', '${done.totalDistanceKm} km'),
+                const Divider(color: Colors.white24, height: 20),
+                _doneStatRow(Icons.eco,
+                    'CO\u2082 Footprint',
+                    '${done.carbonFootprintKg.toStringAsFixed(2)} kg'),
+                const Divider(color: Colors.white24, height: 20),
+                _doneStatRow(Icons.local_gas_station,
+                    'Fuel Used', '${done.estimatedFuel.toStringAsFixed(1)} L'),
+                if (done.assignedArea.isNotEmpty) ...[
+                  const Divider(color: Colors.white24, height: 20),
+                  _doneStatRow(Icons.location_city,
+                      'Area', done.assignedArea),
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 28),
+
+          // Generate new route button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _generating ? null : _generateRoute,
+              icon: _generating
+                  ? const SizedBox(
+                      width: 16, height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.refresh_rounded),
+              label: Text(
+                _generating ? 'Checking for new bins\u2026' : 'Check for New Urgent Bins',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppCol.btnbacks,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                disabledBackgroundColor:
+                    AppCol.btnbacks.withOpacity(0.5),
+              ),
+            ),
+          ),
+          if (_genError != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: Text(
+                _genError!,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Colors.orange.shade800),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _doneStatRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, color: Colors.white70, size: 16),
+        const SizedBox(width: 10),
+        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        const Spacer(),
+        Text(value,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.bold)),
+      ],
     );
   }
 
@@ -511,53 +977,69 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
               ),
             ),
 
+            // Completed badge — shown when this stop is marked done
+            if (isDone) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade300),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green.shade600, size: 16),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Collected ✓',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // Action buttons — shown only for pending stops
             if (!isDone) ...[
               const SizedBox(height: 12),
 
-              // Action buttons
               if (isBusy)
-                const Center(child: SizedBox(height: 28, width: 28, child: CircularProgressIndicator(strokeWidth: 2, color: AppCol.btnbacks)))
+                const Center(child: SizedBox(height: 28, width: 28,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppCol.btnbacks)))
               else
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Navigate with Google Maps
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => _openGoogleMaps(stop.lat, stop.lng),
-                        icon: const Icon(Icons.map_outlined, size: 16),
-                        label: const Text('Maps', style: TextStyle(fontSize: 12)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppCol.btnbacks,
-                          side: BorderSide(color: AppCol.btnbacks.withOpacity(0.6)),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
+                    // Mark Complete (full width, primary action)
+                    ElevatedButton.icon(
+                      onPressed: () => _completeStop(stop),
+                      icon: const Icon(Icons.check_circle_outline, size: 16),
+                      label: const Text('Mark Complete',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    // Complete collection
-                    Expanded(
-                      flex: 2,
-                      child: ElevatedButton.icon(
-                        onPressed: () => _completeStop(stop),
-                        icon: const Icon(Icons.check_circle_outline, size: 16),
-                        label: const Text('Complete', style: TextStyle(fontSize: 12)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Report issue
-                    IconButton(
+                    const SizedBox(height: 6),
+                    // Report Issue (secondary, outlined)
+                    OutlinedButton.icon(
                       onPressed: () => _reportIssue(stop),
-                      icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
-                      tooltip: 'Report issue',
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.orange.withOpacity(0.1),
+                      icon: const Icon(Icons.warning_amber_rounded, size: 15, color: Colors.orange),
+                      label: const Text('Report Issue',
+                          style: TextStyle(fontSize: 12, color: Colors.orange)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orange,
+                        side: BorderSide(color: Colors.orange.withOpacity(0.6)),
+                        padding: const EdgeInsets.symmetric(vertical: 9),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
