@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:cc/services/auth_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cc/services/firestore_service.dart';
 import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
@@ -31,17 +32,31 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadUserData() async {
-    // Simulate a network delay for the shimmer effect to be visible
     await Future.delayed(const Duration(seconds: 2));
     final currentUser = _authService.currentUser;
-    if (currentUser != null) {
-      final user = await _firestoreService.getUser(currentUser.uid);
-      if (mounted) {
-        setState(() {
-          _user = user;
-          _isLoading = false;
-        });
-      }
+    if (currentUser == null) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+    final user = await _firestoreService.getUser(currentUser.uid);
+    if (mounted) {
+      setState(() {
+        // Fall back to Firebase Auth data when the Firestore document is missing
+        // or was created without these fields.
+        _user = user ??
+            UserModel(
+              uid: currentUser.uid,
+              email: currentUser.email ?? '',
+              firstName: currentUser.displayName?.split(' ').first ?? '',
+              lastName: currentUser.displayName != null &&
+                      currentUser.displayName!.contains(' ')
+                  ? currentUser.displayName!.split(' ').sublist(1).join(' ')
+                  : '',
+              profilePicture: currentUser.photoURL ?? '',
+              createdAt: Timestamp.now(),
+            );
+        _isLoading = false;
+      });
     }
   }
 
@@ -303,7 +318,9 @@ void _showDeleteAccountDialog() {
         ),
         _buildEditableTile(
           title: "Email",
-          value: _user?.email ?? 'Unknown',
+          value: (_user?.email.isNotEmpty == true)
+              ? _user!.email
+              : (_authService.currentUser?.email ?? 'Unknown'),
           icon: Icons.email,
           onEdit: null,
         ),
@@ -325,20 +342,6 @@ void _showDeleteAccountDialog() {
           icon: Icons.delete,
           title: "Delete Account",
           onTap: _showDeleteAccountDialog,
-        ),
-        _buildListTile(
-          icon: Icons.logout,
-          title: "Sign Out",
-          onTap: () async {
-
-          await _authService.signOut();
-    
-            if (!mounted) return;
-            Navigator.of(context).pushAndRemoveUntil( 
-            MaterialPageRoute(builder: (context) => AuthLandingScreen()), 
-            (Route<dynamic> route) => false,
-            );
-          },
         ),
       ],
     );

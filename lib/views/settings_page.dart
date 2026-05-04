@@ -1,3 +1,5 @@
+import 'package:cc/services/auth_service.dart';
+import 'package:cc/views/auth/auth_landing_screen.dart';
 import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
 import '../utils/colors.dart';
@@ -14,6 +16,7 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  final AuthService _authService = AuthService();
   bool isNotificationsEnabled = true;
   bool isBikeUsageTrackingEnabled = true;
 
@@ -102,6 +105,26 @@ class _SettingsPageState extends State<SettingsPage> {
                         title: "Help & Support",
                         subtitle: "Get assistance",
                         onTap: () {},
+                      ),
+                      Divider(
+                        color: Colors.grey.withOpacity(0.4),
+                        thickness: 1,
+                      ),
+                      _buildListTile(
+                        icon: Icons.logout,
+                        title: "Sign Out",
+                        subtitle: "Sign out of your account",
+                        onTap: () async {
+                          final navigator = Navigator.of(context);
+                          await _authService.signOut();
+                          if (!mounted) return;
+                          navigator.pushAndRemoveUntil(
+                            MaterialPageRoute(
+                              builder: (context) => AuthLandingScreen(),
+                            ),
+                            (Route<dynamic> route) => false,
+                          );
+                        },
                       ),
                     ],
                   ),

@@ -8,7 +8,8 @@ import 'package:http/http.dart' as http;
 //   Android emulator → '10.0.2.2'   (maps to host machine localhost)
 //   Physical device  → your PC's LAN IP (run `ipconfig` on Windows / `ifconfig` on Mac)
 //   Example: 'http://192.168.1.67:8000'
-const String _deviceBase = 'http://192.168.1.67:8000';
+//const String _deviceBase = 'http://192.168.1.67:8000';
+const String _deviceBase = 'https://scribe-childlike-earshot.ngrok-free.dev';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Central service for all calls to the FastAPI backend.
@@ -16,6 +17,15 @@ class ApiService {
   static const String _base = kIsWeb
       ? 'http://localhost:8000'
       : _deviceBase;
+
+  // Prevents ngrok's browser-warning page from being returned instead of JSON.
+  static const Map<String, String> _jsonHeaders = {
+    'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
+  };
+  static const Map<String, String> _baseHeaders = {
+    'ngrok-skip-browser-warning': 'true',
+  };
 
   // ── 1. Analyze bin image ──────────────────────────────────────────────────
   // Field name MUST be "image_file" — matches FastAPI's parameter name exactly.
@@ -39,7 +49,8 @@ class ApiService {
       };
       final uri = Uri.parse('$_base/analyze/').replace(queryParameters: params);
 
-      final request = http.MultipartRequest('POST', uri);
+      final request = http.MultipartRequest('POST', uri)
+        ..headers.addAll(_baseHeaders);
 
       if (imageBytes != null) {
         // Works on both web and mobile
@@ -83,7 +94,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$_base/update-worker-location'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders,
         body: json.encode({
           'driver_id': driverId,
           'lat': lat,
@@ -110,7 +121,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$_base/complete-stop'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders,
         body: json.encode({
           'route_id':  routeId,
           'bin_id':    binId,
@@ -144,7 +155,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$_base/optimize-route'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders,
         body: json.encode({
           'worker_id': workerId,
           'depot_lat': depotLat,
@@ -169,6 +180,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$_base/worker/my-route/$workerId'),
+        headers: _baseHeaders,
       );
       if (response.statusCode == 200) {
         return json.decode(response.body) as Map<String, dynamic>;
@@ -192,7 +204,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$_base/report-anomaly'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _jsonHeaders,
         body: json.encode({
           'bin_id': binId,
           'anomaly_type': anomalyType,
