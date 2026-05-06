@@ -282,17 +282,32 @@ Widget _buildPasswordField(double screenWidth) {
 
   Widget _buildSubmitButton(double screenWidth) {
     final screenHeight = MediaQuery.of(context).size.height;
-    return SizedBox(
+    return Container(
       width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [AppCol.btnbacks, AppCol.btnbacke],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: AppCol.primary.withValues(alpha: 0.35),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: ElevatedButton(
         onPressed: _isLoading ? null : _signup,
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppCol.appbodye,
+          backgroundColor: Colors.transparent,
           foregroundColor: AppCol.white,
-          elevation: 4,
-          shadowColor: AppCol.appbodye.withOpacity(0.4),
+          shadowColor: Colors.transparent,
+          elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(30),
           ),
           padding: EdgeInsets.symmetric(
             vertical: screenHeight * 0.022,

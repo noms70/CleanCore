@@ -51,6 +51,13 @@ class _MapPageState extends State<MapPage> {
   List<BinLocation> _bins = [];
   BinLocation? _selectedBin;
 
+  // Raw Firestore docs — stored so any position update can re-filter without
+  // waiting for a new Firestore snapshot.
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _rawBinDocs = [];
+
+  // Workers within 10 km see bins when no assignedArea is set.
+  static const double _proximityRadiusM = 10000;
+
   // Worker assignment — loaded once from Firestore so the bin query can filter
   String _assignedArea = '';
   String _assignedWasteType = '';
@@ -114,6 +121,11 @@ class _MapPageState extends State<MapPage> {
         zoom: 14.5,
       );
       _startLocationStream();
+      // Bins may have loaded before GPS was ready — re-filter now that we
+      // have a position, but only when there is no explicit area assignment.
+      if (_assignedArea.isEmpty && _rawBinDocs.isNotEmpty) {
+        _applyBinFilter();
+      }
     } catch (_) {
       _initialPosition = CameraPosition(
         target: LatLng(widget.driverLat, widget.driverLng),
@@ -144,40 +156,76 @@ class _MapPageState extends State<MapPage> {
   // ── Firestore: live bin updates (filtered by worker assignment) ───────────
   void _subscribeToBins() {
     _binsSub = _db.collection('bins').snapshots().listen((snap) {
-      final live = snap.docs.where((d) {
-        final data = d.data();
-
-        // Must have GPS coordinates
-        if (data['lat'] == null && data['lng'] == null &&
-            data['location'] is! GeoPoint) return false;
-
-        // Filter: only bins in the worker's assigned district.
-        if (_assignedArea.isNotEmpty) {
-          final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
-          // Strict filter: if worker has an area, bin MUST match it.
-          if (binArea != _assignedArea) return false;
-        }
-
-        // Filter: only bins matching the worker's assigned waste stream
-        if (_assignedWasteType.isNotEmpty) {
-          final binWaste =
-              (data['wasteType'] ?? data['waste_type'] ?? data['type'] ?? '')
-                  .toString()
-                  .trim()
-                  .toLowerCase();
-          if (binWaste != _assignedWasteType.toLowerCase()) return false;
-        }
-
-        return true;
-      }).map((d) => BinLocation.fromFirestore(d)).toList();
-
-      if (mounted) {
-        setState(() {
-          _bins = live;
-          _generateMarkers();
-        });
-      }
+      _rawBinDocs = snap.docs;
+      _applyBinFilter();
     });
+  }
+
+  // Re-applies the current filter against the cached raw docs and updates state.
+  // Called on every new Firestore snapshot AND on significant GPS movement.
+  void _applyBinFilter() {
+    final filtered = _buildFilteredBins(_rawBinDocs);
+    if (mounted) {
+      setState(() {
+        _bins = filtered;
+        _generateMarkers();
+      });
+    }
+  }
+
+  // Returns the subset of raw docs visible to this worker.
+  // • Assigned workers  → strict area + waste-type match (existing behaviour).
+  // • Unassigned workers → bins within _proximityRadiusM of current GPS.
+  // • No GPS yet         → show everything so the map isn't empty on first load.
+  List<BinLocation> _buildFilteredBins(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    return docs.where((d) {
+      final data = d.data();
+
+      final binLat = _getBinLat(data);
+      final binLng = _getBinLng(data);
+      if (binLat == null || binLng == null) return false;
+
+      if (_assignedArea.isNotEmpty) {
+        final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
+        if (binArea != _assignedArea) return false;
+      } else if (_currentPosition != null) {
+        final distM = Geolocator.distanceBetween(
+          _currentPosition!.latitude,
+          _currentPosition!.longitude,
+          binLat,
+          binLng,
+        );
+        if (distM > _proximityRadiusM) return false;
+      }
+
+      if (_assignedWasteType.isNotEmpty) {
+        final binWaste =
+            (data['wasteType'] ?? data['waste_type'] ?? data['type'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase();
+        if (binWaste != _assignedWasteType.toLowerCase()) return false;
+      }
+
+      return true;
+    }).map((d) => BinLocation.fromFirestore(d)).toList();
+  }
+
+  double? _getBinLat(Map<String, dynamic> data) {
+    if (data['lat'] != null) return (data['lat'] as num).toDouble();
+    if (data['location'] is GeoPoint) {
+      return (data['location'] as GeoPoint).latitude;
+    }
+    return null;
+  }
+
+  double? _getBinLng(Map<String, dynamic> data) {
+    if (data['lng'] != null) return (data['lng'] as num).toDouble();
+    if (data['location'] is GeoPoint) {
+      return (data['location'] as GeoPoint).longitude;
+    }
+    return null;
   }
 
   // ── Firestore: active route for this driver ───────────────────────────────
@@ -191,39 +239,71 @@ class _MapPageState extends State<MapPage> {
         .limit(1)
         .snapshots()
         .listen((snap) {
-      if (mounted) {
-        setState(() {
-          _activeRoute = snap.docs.isNotEmpty
-              ? ActiveRoute.fromFirestore(snap.docs.first)
-              : null;
-              
-          _polylines.clear();
-          if (_activeRoute != null && _activeRoute!.stops.isNotEmpty) {
-            List<LatLng> points = [];
-            if (_currentPosition != null) {
-              points.add(LatLng(_currentPosition!.latitude, _currentPosition!.longitude));
-            }
-            
-            // Add remaining uncollected stops to the polyline
-            final uncollectedStops = _activeRoute!.stops;
-            for (var stop in uncollectedStops) {
-              points.add(LatLng(stop.lat, stop.lng));
-            }
+      if (!mounted) return;
+      setState(() {
+        _activeRoute = snap.docs.isNotEmpty
+            ? ActiveRoute.fromFirestore(snap.docs.first)
+            : null;
+        if (_activeRoute == null) _polylines.clear();
+      });
+      if (_activeRoute != null) _fetchAndDrawRoutePolyline();
+    });
+  }
 
-            if (points.length > 1) {
-              _polylines.add(
-                Polyline(
-                  polylineId: const PolylineId('active_route'),
-                  points: points,
-                  color: AppCol.btnbacks,
-                  width: 5,
-                  patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-                ),
-              );
-            }
-          }
-        });
+  // ── OSRM road-based polyline ──────────────────────────────────────────────
+  // Fetches the actual road route from the worker's current position through
+  // every pending stop in order. Re-called whenever the route changes or the
+  // driver moves (50 m trigger in _startLocationStream).
+  Future<void> _fetchAndDrawRoutePolyline() async {
+    if (_activeRoute == null) return;
+
+    final origin = _currentPosition != null
+        ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
+        : LatLng(widget.driverLat, widget.driverLng);
+
+    final pending = _activeRoute!.stops.where((s) => !s.completed).toList();
+    if (pending.isEmpty) {
+      if (mounted) setState(() => _polylines.clear());
+      return;
+    }
+
+    final waypoints = [origin, ...pending.map((s) => LatLng(s.lat, s.lng))];
+    final coordStr =
+        waypoints.map((p) => '${p.longitude},${p.latitude}').join(';');
+    final url =
+        'http://router.project-osrm.org/route/v1/driving/$coordStr'
+        '?overview=full&geometries=polyline';
+
+    var coords = <LatLng>[];
+    try {
+      final res = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final body = json.decode(res.body) as Map<String, dynamic>;
+        if (body['code'] == 'Ok' && (body['routes'] as List).isNotEmpty) {
+          final encoded = (body['routes'] as List)[0]['geometry'] as String;
+          coords = PolylinePoints.decodePolyline(encoded)
+              .map((p) => LatLng(p.latitude, p.longitude))
+              .toList();
+        }
       }
+    } catch (_) {}
+
+    // Fallback: straight lines when OSRM is unreachable
+    if (coords.isEmpty) coords = waypoints;
+
+    if (!mounted) return;
+    setState(() {
+      _polylines = {
+        Polyline(
+          polylineId: const PolylineId('active_route'),
+          points: coords,
+          color: AppCol.btnbacks,
+          width: 5,
+          patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+        ),
+      };
     });
   }
 
@@ -246,12 +326,21 @@ class _MapPageState extends State<MapPage> {
           final binId = doc.doc.id;
           if (_notifiedUrgentBins.contains(binId)) continue;
 
-          // Filter by worker's assigned area (empty area = accept all)
           final data = doc.doc.data() as Map<String, dynamic>;
           final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
-          if (_assignedArea.isNotEmpty &&
-              binArea.isNotEmpty &&
-              binArea != _assignedArea) continue;
+          if (_assignedArea.isNotEmpty) {
+            if (binArea.isNotEmpty && binArea != _assignedArea) continue;
+          } else if (_currentPosition != null) {
+            final binLat = _getBinLat(data);
+            final binLng = _getBinLng(data);
+            if (binLat != null && binLng != null) {
+              final distM = Geolocator.distanceBetween(
+                _currentPosition!.latitude, _currentPosition!.longitude,
+                binLat, binLng,
+              );
+              if (distM > _proximityRadiusM) continue;
+            }
+          }
 
           _notifiedUrgentBins.add(binId);
           final urgent = BinLocation.fromFirestore(doc.doc);
@@ -285,6 +374,13 @@ class _MapPageState extends State<MapPage> {
           lng: pos.longitude,
         );
       }
+      // For unassigned workers the visible bins depend on position —
+      // re-filter so the map reflects their latest location.
+      if (_assignedArea.isEmpty && _rawBinDocs.isNotEmpty) {
+        _applyBinFilter();
+      }
+      // Re-draw the road polyline from the driver's new position.
+      if (_activeRoute != null) _fetchAndDrawRoutePolyline();
     });
   }
 
@@ -449,12 +545,54 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  // ── Scan bin with camera → POST /analyze/ ────────────────────────────────
-  Future<void> _scanBin(BinLocation bin) async {
-    final picked = await _picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 85,
+  // ── Image source picker (camera or gallery) ──────────────────────────────
+  Future<ImageSource?> _pickImageSource() {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Select Image Source',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 4),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Choose from Gallery'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
     );
+  }
+
+  // ── Scan bin with AI → POST /analyze/ ────────────────────────────────────
+  Future<void> _scanBin(BinLocation bin) async {
+    final source = await _pickImageSource();
+    if (source == null || !mounted) return;
+
+    final picked = await _picker.pickImage(source: source, imageQuality: 85);
     if (picked == null || !mounted) return;
 
     setState(() => _scanning = true);

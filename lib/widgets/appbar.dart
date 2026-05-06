@@ -6,34 +6,49 @@ class AppBuild {
   PreferredSizeWidget buildAppBar({
     required String title,
     final double titleSize = 0.0,
-    IconData? icon, // Use IconData for icons
-    String? image, // Use a string path for images
-    List<Widget>? actions, // ✅ Add actions here
+    IconData? icon,
+    String? image,
+    List<Widget>? actions,
   }) {
     return PreferredSize(
-      preferredSize: const Size.fromHeight(125),
+      preferredSize: const Size.fromHeight(105),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          double screenWidth = MediaQuery.of(context).size.width;
-          double screenHeight = MediaQuery.of(context).size.height;
+          final screenWidth  = MediaQuery.of(context).size.width;
+          final screenHeight = MediaQuery.of(context).size.height;
+          final isDark       = Theme.of(context).brightness == Brightness.dark;
 
-          double paddingLeft = screenWidth * 0.08;
-          double iconSize = screenWidth * 0.15;
-          double fontSize = screenWidth * 0.065;
+          final double paddingLeft = screenWidth * 0.08;
+          final double iconSize    = screenWidth * 0.13;
+          final double fontSize    = screenWidth * 0.062;
+
+          final gradient = isDark ? AppCol.headerDark : AppCol.headerback;
+          final textColor = isDark ? Colors.white : AppCol.primaryDark;
+          final iconColor = isDark ? AppCol.primary  : AppCol.primaryDark;
 
           return AnnotatedRegion<SystemUiOverlayStyle>(
-            value: const SystemUiOverlayStyle(
-              statusBarColor: Colors.black,
-              statusBarIconBrightness: Brightness.dark,
-            ),
+            value: isDark
+                ? SystemUiOverlayStyle.light
+                : const SystemUiOverlayStyle(
+                    statusBarColor: Colors.transparent,
+                    statusBarIconBrightness: Brightness.dark,
+                  ),
             child: AppBar(
               automaticallyImplyLeading: true,
-              iconTheme: IconThemeData(color: AppCol.btntext),
+              iconTheme: IconThemeData(color: textColor),
               backgroundColor: Colors.transparent,
               elevation: 0,
-              actions: actions, // ✅ Set actions here
+              actions: actions,
               flexibleSpace: Container(
-                decoration: BoxDecoration(gradient: AppCol.headerback),
+                decoration: BoxDecoration(
+                  gradient: gradient,
+                  // Subtle bottom border in primary color for dark mode polish
+                  border: isDark
+                      ? const Border(
+                          bottom: BorderSide(color: AppCol.secondary, width: 1),
+                        )
+                      : null,
+                ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -44,7 +59,7 @@ class AppBuild {
                         Padding(
                           padding: EdgeInsets.only(
                             left: paddingLeft,
-                            bottom: screenHeight * 0.03,
+                            bottom: screenHeight * 0.025,
                           ),
                           child: Text(
                             title,
@@ -52,27 +67,27 @@ class AppBuild {
                               fontSize: titleSize == 0 ? fontSize : titleSize,
                               fontWeight: FontWeight.w700,
                               fontFamily: 'Montserrat',
-                              color: AppCol.btntext.withOpacity(0.95),
+                              color: textColor,
+                              letterSpacing: 0.3,
                             ),
                           ),
                         ),
                         const Spacer(),
                         Padding(
-                          padding: EdgeInsets.only(right: screenWidth * 0.04, bottom: screenHeight * 0.015),
+                          padding: EdgeInsets.only(
+                            right: screenWidth * 0.04,
+                            bottom: screenHeight * 0.012,
+                          ),
                           child: icon != null
-                              ? Icon(
-                                  icon,
-                                  size: iconSize,
-                                  color: AppCol.btntext,
-                                )
+                              ? Icon(icon, size: iconSize, color: iconColor)
                               : image != null
-                              ? Image.asset(
-                                  image,
-                                  height: iconSize * 1.1,
-                                  width: iconSize * 2,
-                                  fit: BoxFit.contain,
-                                )
-                              : const SizedBox(),
+                                  ? Image.asset(
+                                      image,
+                                      height: iconSize * 1.1,
+                                      width: iconSize * 2,
+                                      fit: BoxFit.contain,
+                                    )
+                                  : const SizedBox(),
                         ),
                       ],
                     ),

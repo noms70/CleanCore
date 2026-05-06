@@ -1,5 +1,5 @@
+import 'package:cc/utils/colors.dart';
 import 'package:flutter/material.dart';
-import '../utils/colors.dart';
 
 class NavBar extends StatelessWidget {
   final String currentPage;
@@ -10,18 +10,26 @@ class NavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // --- 1. RESPONSIVE LOGIC (Same as before) ---
     final double screenWidth = MediaQuery.of(context).size.width;
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
     const double maxNavBarWidth = 500.0;
-    const double mobileHorizontalPadding = 15.0;
+    const double mobileHorizontalPadding = 16.0;
 
     double horizontalPadding;
-    if (screenWidth > (maxNavBarWidth + (mobileHorizontalPadding * 2))) {
+    if (screenWidth > (maxNavBarWidth + mobileHorizontalPadding * 2)) {
       horizontalPadding = (screenWidth - maxNavBarWidth) / 2;
     } else {
       horizontalPadding = mobileHorizontalPadding;
     }
-    // --- END RESPONSIVE LOGIC ---
+
+    // Dark: card navy with teal accent. Light: white with teal accent.
+    final Color navBg      = isDark ? AppCol.card : Colors.white;
+    final Color selectedFg = AppCol.primary;
+    final Color unselectedFg =
+        isDark ? AppCol.mutedFg : Colors.grey.shade500;
+    final Color shadowColor =
+        isDark ? Colors.black54 : Colors.black.withValues(alpha: 0.12);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -29,83 +37,103 @@ class NavBar extends StatelessWidget {
         left: horizontalPadding,
         right: horizontalPadding,
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(40.0),
-        child: Container(
-          // Give the nav bar a consistent height
-          height: 70.0, // You can adjust this height
-          decoration: BoxDecoration(
-            color: AppCol.btnbacks,
-          ),
-          // --- 2. LABELS + CENTERING FIX ---
-          // Use a Row for horizontal layout
+      child: Container(
+        height: 68.0,
+        decoration: BoxDecoration(
+          color: navBg,
+          borderRadius: BorderRadius.circular(40.0),
+          border: isDark
+              ? Border.all(color: AppCol.secondary, width: 1)
+              : Border.all(color: Colors.grey.shade200, width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: shadowColor,
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+              spreadRadius: 0,
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(40.0),
           child: Row(
-            // Each item will be an 'Expanded' widget to take up equal space
             children: [
               _buildNavItem(
-                icon: Icons.home,
+                icon: Icons.home_rounded,
                 label: 'Home',
                 pageName: 'home',
+                selectedFg: selectedFg,
+                unselectedFg: unselectedFg,
               ),
               _buildNavItem(
-                icon: Icons.map,
+                icon: Icons.map_rounded,
                 label: 'Map',
                 pageName: 'Map',
+                selectedFg: selectedFg,
+                unselectedFg: unselectedFg,
               ),
               _buildNavItem(
-                icon: Icons.settings,
+                icon: Icons.settings_rounded,
                 label: 'Settings',
                 pageName: 'settings',
+                selectedFg: selectedFg,
+                unselectedFg: unselectedFg,
               ),
             ],
           ),
-          // --- END FIX ---
         ),
       ),
     );
   }
 
-  // --- 3. HELPER WIDGET ---
-  // We create a helper function to build each nav item.
-  // This avoids repeating code.
   Widget _buildNavItem({
     required IconData icon,
     required String label,
     required String pageName,
+    required Color selectedFg,
+    required Color unselectedFg,
   }) {
-    // Check if this item is the currently selected one
     final bool isSelected = (currentPage == pageName);
+    final Color itemColor = isSelected ? selectedFg : unselectedFg;
 
-    // Determine the color based on selection
-    final Color itemColor =
-        isSelected ? AppCol.btnbacke : AppCol.btnbacke.withOpacity(0.4);
-
-    // Expanded makes the widget fill 1/3 of the Row
     return Expanded(
       child: InkWell(
-        // Use InkWell for tap effect
         onTap: () => onNavigate(pageName),
-        // Make the splash effect match the icon color
-        splashColor: AppCol.btnbacke.withOpacity(0.1),
-        highlightColor: AppCol.btnbacke.withOpacity(0.1),
-        child: Column(
-          // Center the icon and text vertically
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              color: itemColor,
-            ),
-            const SizedBox(height: 4), // Space between icon and label
-            Text(
-              label,
-              style: TextStyle(
-                color: itemColor,
-                fontSize: 12, // Standard label font size
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        splashColor: AppCol.primary.withValues(alpha: 0.12),
+        highlightColor: AppCol.primary.withValues(alpha: 0.06),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: EdgeInsets.symmetric(
+                  horizontal: isSelected ? 14 : 0,
+                  vertical: 4,
+                ),
+                decoration: isSelected
+                    ? BoxDecoration(
+                        color: AppCol.primary.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(20),
+                      )
+                    : null,
+                child: Icon(icon, color: itemColor, size: 22),
               ),
-            ),
-          ],
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  color: itemColor,
+                  fontSize: 11,
+                  fontWeight:
+                      isSelected ? FontWeight.w700 : FontWeight.normal,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

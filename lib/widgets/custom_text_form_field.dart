@@ -36,6 +36,7 @@ class CustomTextFormField extends StatelessWidget {
         style: TextStyle(
           fontSize: screenWidth * 0.04,
           fontWeight: FontWeight.w500,
+          color: Colors.black87,
         ),
         decoration: InputDecoration(
           filled: true,
@@ -53,7 +54,7 @@ class CustomTextFormField extends StatelessWidget {
           ),
           prefixIcon: Icon(
             icon,
-            color: AppCol.appbodye,
+            color: AppCol.primary,
             size: 22,
           ),
           suffixIcon: suffixIcon,
@@ -68,7 +69,7 @@ class CustomTextFormField extends StatelessWidget {
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
             borderSide: const BorderSide(
-              color: AppCol.appbodye,
+              color: AppCol.primary,
               width: 2,
             ),
           ),

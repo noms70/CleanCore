@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+
 import 'package:cc/models/user_model.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:cc/services/auth_service.dart';
 import 'package:cc/services/firestore_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -72,7 +74,157 @@ class ProgressPainter extends CustomPainter {
 }
 
 // =========================================================================
-// 2. HomePage Implementation
+// 2. Animated Metric Card
+// =========================================================================
+
+class _AnimatedMetricCard extends StatefulWidget {
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color accentColor;
+  final List<Color> gradient;
+  final bool isDark;
+
+  const _AnimatedMetricCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.accentColor,
+    required this.gradient,
+    required this.isDark,
+  });
+
+  @override
+  State<_AnimatedMetricCard> createState() => _AnimatedMetricCardState();
+}
+
+class _AnimatedMetricCardState extends State<_AnimatedMetricCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _pressCtrl;
+  late Animation<double> _scaleAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _pressCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+      lowerBound: 0.0,
+      upperBound: 1.0,
+    );
+    _scaleAnim = Tween<double>(begin: 1.0, end: 0.94).animate(
+      CurvedAnimation(parent: _pressCtrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pressCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => _pressCtrl.forward(),
+      onTapUp: (_) => _pressCtrl.reverse(),
+      onTapCancel: () => _pressCtrl.reverse(),
+      child: AnimatedBuilder(
+        animation: _scaleAnim,
+        builder: (_, child) =>
+            Transform.scale(scale: _scaleAnim.value, child: child),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              colors: widget.isDark
+                  ? [
+                      widget.gradient[0].withValues(alpha: 0.20),
+                      widget.gradient[1].withValues(alpha: 0.10),
+                    ]
+                  : [
+                      widget.gradient[0].withValues(alpha: 0.12),
+                      widget.gradient[1].withValues(alpha: 0.06),
+                    ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            border: Border.all(
+              color: widget.accentColor.withValues(alpha: widget.isDark ? 0.30 : 0.20),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: widget.accentColor.withValues(alpha: widget.isDark ? 0.18 : 0.10),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Icon + title row
+              Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: widget.gradient,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(9),
+                      boxShadow: [
+                        BoxShadow(
+                          color: widget.accentColor.withValues(alpha: 0.4),
+                          blurRadius: 6,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Icon(widget.icon, color: Colors.white, size: 17),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: widget.accentColor,
+                        letterSpacing: 0.3,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              // Value
+              Text(
+                widget.value,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: Theme.of(context).colorScheme.onSurface,
+                  letterSpacing: -0.5,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =========================================================================
+// 3. HomePage Implementation
 // =========================================================================
 
 class HomePage extends StatefulWidget {
@@ -162,7 +314,7 @@ class _HomePageState extends State<HomePage> {
         completedBins = route.completedStops;
         totalBins = route.totalStops;
         routeId = route.routeId.length > 12
-            ? route.routeId.substring(0, 12) + '…'
+            ? '${route.routeId.substring(0, 12)}…'
             : route.routeId;
         estimatedFuel = route.estimatedFuel;
         currentStatus = 'On Route';
@@ -176,25 +328,45 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  /// Count critical bins in the worker's assigned area from Firestore.
+  static const double _proximityRadiusM = 10000; // must match map_page
+
+  /// Count critical bins visible to this worker (area-scoped or proximity-based).
   void _subscribeToBinStats() {
     _binsSub = _db.collection('bins').snapshots().listen((snap) {
       if (!mounted) return;
-      final workerArea = _user?.assignedArea ?? '';
+      final workerArea  = _user?.assignedArea ?? '';
       final workerWaste = (_user?.assignedWasteType ?? '').toLowerCase();
+      final userLat     = _user?.lat ?? 0.0;
+      final userLng     = _user?.lng ?? 0.0;
 
       final critical = snap.docs.where((d) {
-        final data = d.data();
+        final data   = d.data();
         final fill   = (data['fillLevel'] ?? data['fill_level'] ?? 0) as num;
         final status = (data['status'] ?? '').toString().toLowerCase();
 
-        // Scope to worker's area/waste type once profile is loaded
         if (workerArea.isNotEmpty) {
           final binArea = (data['area'] ?? data['sector'] ?? '').toString();
           if (binArea != workerArea) return false;
+        } else if (userLat != 0.0 && userLng != 0.0) {
+          // No area assigned — fall back to proximity using stored coordinates.
+          final binLat = (data['lat'] as num?)?.toDouble()
+              ?? (data['location'] is GeoPoint
+                  ? (data['location'] as GeoPoint).latitude
+                  : null);
+          final binLng = (data['lng'] as num?)?.toDouble()
+              ?? (data['location'] is GeoPoint
+                  ? (data['location'] as GeoPoint).longitude
+                  : null);
+          if (binLat != null && binLng != null) {
+            final distM = Geolocator.distanceBetween(
+                userLat, userLng, binLat, binLng);
+            if (distM > _proximityRadiusM) return false;
+          }
         }
+
         if (workerWaste.isNotEmpty) {
-          final binWaste = (data['wasteType'] ?? data['type'] ?? '').toString().toLowerCase();
+          final binWaste =
+              (data['wasteType'] ?? data['type'] ?? '').toString().toLowerCase();
           if (binWaste != workerWaste) return false;
         }
 
@@ -222,16 +394,16 @@ class _HomePageState extends State<HomePage> {
     final hour = DateTime.now().hour;
     if (hour < 12) {
       _greeting = 'Good Morning';
-      _sunIcon = Icons.wb_sunny;
-      _gradientColors = [const Color(0xFFFDB750), const Color(0xFFF77F00)];
+      _sunIcon = Icons.wb_sunny_rounded;
+      _gradientColors = [AppCol.success, AppCol.primary]; // fresh teal-green
     } else if (hour < 17) {
       _greeting = 'Good Afternoon';
-      _sunIcon = Icons.wb_sunny;
-      _gradientColors = [const Color(0xFF00D9D9), const Color(0xFF0A8E8B)];
+      _sunIcon = Icons.wb_sunny_rounded;
+      _gradientColors = [AppCol.primary, AppCol.card];    // teal → card navy
     } else {
       _greeting = 'Good Evening';
-      _sunIcon = Icons.nights_stay;
-      _gradientColors = [const Color(0xFF2D3E50), const Color(0xFF1A1F36)];
+      _sunIcon = Icons.nights_stay_rounded;
+      _gradientColors = [AppCol.card, AppCol.primaryDark]; // deep navy evening
     }
   }
 
@@ -245,8 +417,7 @@ class _HomePageState extends State<HomePage> {
       return _buildUserInfoSkeleton(screenSize);
     }
 
-    final firstName = _capitalize(_user!.firstName);
-    final lastName = _capitalize(_user!.lastName);
+    final firstName  = _capitalize(_user!.firstName);
     final profilePic = _user!.profilePicture;
 
     ImageProvider? backgroundImage;
@@ -277,7 +448,7 @@ class _HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.circular(screenSize.width * 0.04),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
+            color: Colors.black.withValues(alpha: 0.3),
             blurRadius: 10,
             offset: const Offset(0, 6),
           ),
@@ -349,11 +520,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildUserInfoSkeleton(Size screenSize) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final shimBase = isDark ? AppCol.secondary : Colors.grey.withValues(alpha: 0.2);
+    final shimShine = isDark ? AppCol.card : Colors.grey.withValues(alpha: 0.1);
+
     return Container(
       margin: EdgeInsets.all(screenSize.width * 0.04),
       padding: EdgeInsets.all(screenSize.width * 0.04),
       decoration: BoxDecoration(
-        color: Colors.grey.withOpacity(0.2),
+        color: shimBase,
         borderRadius: BorderRadius.circular(screenSize.width * 0.04),
       ),
       child: Row(
@@ -363,7 +538,7 @@ class _HomePageState extends State<HomePage> {
             height: screenSize.width * 0.16,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.grey.withOpacity(0.3),
+              color: shimShine,
             ),
           ),
           SizedBox(width: screenSize.width * 0.04),
@@ -373,10 +548,10 @@ class _HomePageState extends State<HomePage> {
               children: [
                 Container(
                   height: 12,
-                  color: Colors.grey.withOpacity(0.3),
+                  color: shimShine,
                   margin: EdgeInsets.only(bottom: screenSize.width * 0.02),
                 ),
-                Container(height: 12, color: Colors.grey.withOpacity(0.3)),
+                Container(height: 12, color: shimShine),
               ],
             ),
           ),
@@ -428,25 +603,15 @@ class _HomePageState extends State<HomePage> {
           shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(bottom: Radius.circular(40)),
           ),
-          backgroundColor: AppCol.btnbacks,
+          backgroundColor: AppCol.primaryDark,
           elevation: 0,
-          title: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 50, bottom: 10),
-                  child: Center(
-                    child: Image.asset(
-                      'assets/cc_logo.png',
-                      height: 100,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 48), // Spacer to balance the layout
-            ],
+          toolbarHeight: 80,
+          title: Center(
+            child: Image.asset(
+              'assets/app_logo_2.png',
+              height: 72,
+              fit: BoxFit.contain,
+            ),
           ),
         ),
         body: _buildHomePageContent(
@@ -482,8 +647,9 @@ class _HomePageState extends State<HomePage> {
 
   // --- NEW: Circular Progress Bar for Route Completion ---
   Widget _buildCircularProgressSection(Size screenSize) {
-    final progress = totalBins == 0 ? 0.0 : completedBins / totalBins;
+    final progress           = totalBins == 0 ? 0.0 : completedBins / totalBins;
     final progressPercentage = (progress * 100).toStringAsFixed(0);
+    final scheme             = Theme.of(context).colorScheme;
 
     return Center(
       child: SizedBox(
@@ -492,13 +658,12 @@ class _HomePageState extends State<HomePage> {
         child: Stack(
           alignment: Alignment.center,
           children: [
-            // **FIXED ERROR:** ProgressPainter is now a top-level class and is used correctly.
             CustomPaint(
               size: Size(screenSize.width * 0.5, screenSize.width * 0.5),
               painter: ProgressPainter(
                 progress: progress,
-                baseColor: AppCol.btnbacks.withOpacity(0.2),
-                progressColor: AppCol.btnbacks,
+                baseColor: AppCol.primary.withValues(alpha: 0.15),
+                progressColor: AppCol.primary,
                 strokeWidth: 12.0,
               ),
             ),
@@ -506,9 +671,9 @@ class _HomePageState extends State<HomePage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  Icons.delete_sweep_sharp, // Bin/Sweep Icon
+                  Icons.delete_sweep_rounded,
                   size: screenSize.width * 0.1,
-                  color: AppCol.btnbacks,
+                  color: AppCol.primary,
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -516,14 +681,14 @@ class _HomePageState extends State<HomePage> {
                   style: TextStyle(
                     fontSize: screenSize.width * 0.1,
                     fontWeight: FontWeight.bold,
-                    color: AppCol.btntext,
+                    color: scheme.onSurface,
                   ),
                 ),
                 Text(
                   'Route Progress',
                   style: TextStyle(
                     fontSize: screenSize.width * 0.04,
-                    color: AppCol.textGrey,
+                    color: scheme.onSurface.withValues(alpha: 0.5),
                   ),
                 ),
               ],
@@ -534,60 +699,75 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // --- NEW: Grid of 4 Key Route Metrics Cards ---
+  // --- Route Metrics Grid ---
   Widget _buildKeyRouteMetricsGrid(Size screenSize) {
-    final double cardWidth =
-        (screenSize.width - 50) / 2; // Adjusted calculation for padding/spacing
+    final scheme = Theme.of(context).colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 4.0, bottom: 10),
-            child: Text(
-              'Route Overview',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: AppCol.btntext,
-              ),
+          Padding(
+            padding: const EdgeInsets.only(left: 2, bottom: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: AppCol.primary,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Route Overview',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
             ),
           ),
           GridView.count(
-            physics:
-                const NeverScrollableScrollPhysics(), // Important for SingleChildScrollView
+            physics: const NeverScrollableScrollPhysics(),
             shrinkWrap: true,
             crossAxisCount: 2,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: cardWidth /
-                (cardWidth * 0.6), // Adjust to make cards wider than tall
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 1.55,
             children: [
               _buildMetricCard(
-                'Route ID',
-                routeId,
-                Icons.alt_route,
-                AppCol.btnbacks,
+                title: 'Route ID',
+                value: routeId,
+                icon: Icons.alt_route_rounded,
+                accentColor: AppCol.primary,
+                gradient: const [Color(0xFF0BBFC9), Color(0xFF048A7E)],
               ),
               _buildMetricCard(
-                'Est. Remaining',
-                estimatedTime,
-                Icons.schedule,
-                Colors.orange,
+                title: 'Est. Time',
+                value: estimatedTime,
+                icon: Icons.schedule_rounded,
+                accentColor: const Color(0xFF7C6FED),
+                gradient: const [Color(0xFF7C6FED), Color(0xFF4F46B8)],
               ),
               _buildMetricCard(
-                'Critical Bins',
-                '$criticalBinsNearby Bins',
-                Icons.crisis_alert,
-                Colors.red,
+                title: 'Critical Bins',
+                value: '$criticalBinsNearby',
+                icon: Icons.crisis_alert_rounded,
+                accentColor: const Color(0xFFE05C6A),
+                gradient: const [Color(0xFFE05C6A), Color(0xFFA8293A)],
               ),
               _buildMetricCard(
-                'Fuel Est.',
-                '${estimatedFuel.toStringAsFixed(1)} L',
-                Icons.local_gas_station,
-                AppCol.ngt,
+                title: 'Fuel Est.',
+                value: '${estimatedFuel.toStringAsFixed(1)} L',
+                icon: Icons.local_gas_station_rounded,
+                accentColor: AppCol.success,
+                gradient: const [Color(0xFF1DD1A1), Color(0xFF0E9B77)],
               ),
             ],
           ),
@@ -596,54 +776,22 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildMetricCard(
-      String title, String value, IconData icon, Color color) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 5,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 20),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: color,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppCol.btntext,
-            ),
-          ),
-        ],
-      ),
+  Widget _buildMetricCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color accentColor,
+    required List<Color> gradient,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return _AnimatedMetricCard(
+      title: title,
+      value: value,
+      icon: icon,
+      accentColor: accentColor,
+      gradient: gradient,
+      isDark: isDark,
     );
   }
 }

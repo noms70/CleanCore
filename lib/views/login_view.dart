@@ -203,7 +203,10 @@ class _LoginViewState extends State<LoginView> {
           child: CheckboxListTile(
             title: Text(
               "Remember Me",
-              style: TextStyle(fontSize: screenWidth * 0.04),
+              style: TextStyle(
+                fontSize: screenWidth * 0.04,
+                color: Colors.black87,
+              ),
             ),
             value: _rememberMe,
             onChanged: (value) {

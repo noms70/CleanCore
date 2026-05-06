@@ -1,8 +1,9 @@
 import 'package:cc/services/auth_service.dart';
+import 'package:cc/utils/colors.dart';
+import 'package:cc/utils/theme_service.dart';
 import 'package:cc/views/auth/auth_landing_screen.dart';
 import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
-import '../utils/colors.dart';
 import '../widgets/navbar.dart';
 import 'profile_page.dart';
 
@@ -18,110 +19,141 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final AuthService _authService = AuthService();
   bool isNotificationsEnabled = true;
-  bool isBikeUsageTrackingEnabled = true;
+  bool isLocationTrackingEnabled = true;
 
   @override
   Widget build(BuildContext context) {
-    final Size screenSize = MediaQuery.of(context).size;
+    final isDark   = Theme.of(context).brightness == Brightness.dark;
+    final screenSz = MediaQuery.of(context).size;
+
+    // Header strip is always dark navy — consistent in both modes
+    const headerColor  = AppCol.primaryDark;
+    final surfaceColor = isDark ? AppCol.card : Colors.white;
+
     return Scaffold(
       appBar: AppBuild().buildAppBar(
         title: 'Settings',
-        icon: Icons.settings,
+        icon: Icons.settings_rounded,
       ),
       body: SafeArea(
         child: Container(
-          decoration: BoxDecoration(color: Color(0xFF141C40)),
+          decoration: BoxDecoration(color: headerColor),
           child: Column(
             children: [
               Expanded(
                 child: Container(
-                  width: screenSize.width,
+                  width: screenSz.width,
                   decoration: BoxDecoration(
-                    color: Color(0xFFFCF5FD),
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(35),
+                    color: surfaceColor,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(32),
                     ),
+                    boxShadow: isDark
+                        ? [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.3),
+                              blurRadius: 12,
+                              offset: const Offset(-4, 0),
+                            )
+                          ]
+                        : null,
                   ),
                   child: ListView(
                     padding: EdgeInsets.only(
-                      top: screenSize.width * 0.05,
-                      left: screenSize.width * 0.06,
-                      right: screenSize.width * 0.06,
-                      bottom: screenSize.width * 0.15,
+                      top: screenSz.width * 0.05,
+                      left: screenSz.width * 0.06,
+                      right: screenSz.width * 0.06,
+                      bottom: screenSz.width * 0.18,
                     ),
                     children: [
-                      _buildSectionHeader("Account"),
+                      // ── Account ─────────────────────────────────────────
+                      _buildSectionHeader(context, "Account"),
                       _buildListTile(
-                        icon: Icons.person,
+                        context: context,
+                        icon: Icons.person_rounded,
                         title: "Personal Profile",
                         subtitle: "View and edit your profile",
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const ProfilePage(),
-                            ),
-                          );
-                        },
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ProfilePage()),
+                        ),
                       ),
-                      Divider(
-                        color: Colors.grey.withOpacity(0.4),
-                        thickness: 1,
-                      ),
-                      _buildSectionHeader("Preferences"),
+                      _buildDivider(context),
+
+                      // ── Preferences ──────────────────────────────────────
+                      _buildSectionHeader(context, "Preferences"),
                       _buildSwitchTile(
-                        icon: Icons.notifications,
+                        context: context,
+                        icon: Icons.notifications_rounded,
                         title: "Route Notifications",
                         value: isNotificationsEnabled,
-                        onChanged: (value) {
-                          setState(() {
-                            isNotificationsEnabled = value;
-                          });
-                        },
+                        onChanged: (v) =>
+                            setState(() => isNotificationsEnabled = v),
                       ),
                       _buildSwitchTile(
-                        icon: Icons.track_changes,
+                        context: context,
+                        icon: Icons.location_on_rounded,
                         title: "Location Tracking",
-                        value: isBikeUsageTrackingEnabled,
-                        onChanged: (value) {
-                          setState(() {
-                            isBikeUsageTrackingEnabled = value;
-                          });
-                        },
+                        value: isLocationTrackingEnabled,
+                        onChanged: (v) =>
+                            setState(() => isLocationTrackingEnabled = v),
                       ),
-                      Divider(
-                        color: Colors.grey.withOpacity(0.4),
-                        thickness: 1,
+                      _buildDivider(context),
+
+                      // ── Appearance ───────────────────────────────────────
+                      _buildSectionHeader(context, "Appearance"),
+                      ValueListenableBuilder<ThemeMode>(
+                        valueListenable: themeNotifier,
+                        builder: (_, mode, __) => _buildSwitchTile(
+                          context: context,
+                          icon: mode == ThemeMode.dark
+                              ? Icons.dark_mode_rounded
+                              : Icons.light_mode_rounded,
+                          title: "Dark Mode",
+                          subtitle: mode == ThemeMode.dark
+                              ? "Switch to light theme"
+                              : "Switch to dark theme",
+                          value: mode == ThemeMode.dark,
+                          onChanged: (_) => toggleTheme(),
+                          activeColor: AppCol.primary,
+                        ),
                       ),
-                      _buildSectionHeader("About"),
+                      _buildDivider(context),
+
+                      // ── About ─────────────────────────────────────────────
+                      _buildSectionHeader(context, "About"),
                       _buildListTile(
-                        icon: Icons.info,
+                        context: context,
+                        icon: Icons.info_rounded,
                         title: "App Version",
                         subtitle: "1.0.0",
                         onTap: () {},
                       ),
                       _buildListTile(
-                        icon: Icons.help,
+                        context: context,
+                        icon: Icons.help_rounded,
                         title: "Help & Support",
                         subtitle: "Get assistance",
                         onTap: () {},
                       ),
-                      Divider(
-                        color: Colors.grey.withOpacity(0.4),
-                        thickness: 1,
-                      ),
+                      _buildDivider(context),
+
+                      // ── Sign Out ──────────────────────────────────────────
                       _buildListTile(
-                        icon: Icons.logout,
+                        context: context,
+                        icon: Icons.logout_rounded,
                         title: "Sign Out",
                         subtitle: "Sign out of your account",
+                        iconColor: Colors.redAccent,
+                        titleColor: Colors.redAccent,
                         onTap: () async {
                           final navigator = Navigator.of(context);
                           await _authService.signOut();
                           if (!mounted) return;
                           navigator.pushAndRemoveUntil(
                             MaterialPageRoute(
-                              builder: (context) => AuthLandingScreen(),
-                            ),
+                                builder: (_) => AuthLandingScreen()),
                             (Route<dynamic> route) => false,
                           );
                         },
@@ -141,67 +173,122 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildSectionHeader(String title) {
+  Widget _buildDivider(BuildContext context) {
+    return Divider(
+      color: Theme.of(context).dividerColor,
+      thickness: 1,
+      height: 8,
+    );
+  }
+
+  Widget _buildSectionHeader(BuildContext context, String title) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16.0),
+      padding: const EdgeInsets.only(top: 20, bottom: 10),
       child: Text(
         title,
         style: TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          color: AppCol.btnbacke,
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: AppCol.primary,
+          letterSpacing: 1.0,
         ),
       ),
     );
   }
 
   Widget _buildListTile({
+    required BuildContext context,
     required IconData icon,
     required String title,
-    required String subtitle,
     required Function() onTap,
+    String subtitle = '',
+    Color? iconColor,
+    Color? titleColor,
   }) {
+    final scheme = Theme.of(context).colorScheme;
+    final resolvedIcon  = iconColor  ?? scheme.onSurface;
+    final resolvedTitle = titleColor ?? scheme.onSurface;
+
     return ListTile(
-      leading: Icon(icon, color: AppCol.btnbacke, size: 32),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: resolvedIcon.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: resolvedIcon, size: 22),
+      ),
       title: Text(
         title,
         style: TextStyle(
-          fontSize: 16,
+          fontSize: 15,
           fontWeight: FontWeight.w600,
-          color: AppCol.btnbacke,
+          color: resolvedTitle,
         ),
       ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(fontSize: 14, color: Colors.black.withOpacity(0.6)),
+      subtitle: subtitle.isNotEmpty
+          ? Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 13,
+                color: scheme.onSurface.withValues(alpha: 0.5),
+              ),
+            )
+          : null,
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        color: scheme.onSurface.withValues(alpha: 0.35),
+        size: 20,
       ),
-      trailing: Icon(Icons.arrow_forward_ios, color: AppCol.btnbacke),
       onTap: onTap,
     );
   }
 
   Widget _buildSwitchTile({
+    required BuildContext context,
     required IconData icon,
     required String title,
     required bool value,
     required Function(bool) onChanged,
+    String subtitle = '',
+    Color? activeColor,
   }) {
+    final scheme = Theme.of(context).colorScheme;
+
     return ListTile(
-      leading: Icon(icon, color: AppCol.btnbacke, size: 28),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: AppCol.primary.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: AppCol.primary, size: 22),
+      ),
       title: Text(
         title,
         style: TextStyle(
-          fontSize: 16,
+          fontSize: 15,
           fontWeight: FontWeight.w600,
-          color: AppCol.btnbacke,
+          color: scheme.onSurface,
         ),
       ),
+      subtitle: subtitle.isNotEmpty
+          ? Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 13,
+                color: scheme.onSurface.withValues(alpha: 0.5),
+              ),
+            )
+          : null,
       trailing: Switch(
         value: value,
         onChanged: onChanged,
-        activeColor: AppCol.btnbacke,
-        inactiveThumbColor: AppCol.btnbacke.withOpacity(0.5),
-        inactiveTrackColor: AppCol.btnbacke.withOpacity(0.3),
+        activeThumbColor: activeColor ?? AppCol.primary,
       ),
     );
   }

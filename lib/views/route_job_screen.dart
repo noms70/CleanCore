@@ -324,11 +324,55 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
     );
   }
 
+  Future<ImageSource?> _pickImageSource() {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Select Image Source',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 4),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded),
+              title: const Text('Take Photo'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Choose from Gallery'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _scanBin(RouteStop stop) async {
     if (_scanningBins.contains(stop.binId)) return;
     try {
+      final source = await _pickImageSource();
+      if (source == null || !mounted) return;
+
       final photo = await ImagePicker().pickImage(
-        source: ImageSource.camera,
+        source: source,
         imageQuality: 80,
         maxWidth: 1024,
       );
@@ -977,6 +1021,12 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
               ),
             ),
 
+            // AI scan result (shown after a successful scan)
+            if (_scanResults.containsKey(stop.binId)) ...[
+              const SizedBox(height: 10),
+              _buildScanResult(stop.binId),
+            ],
+
             // Completed badge — shown when this stop is marked done
             if (isDone) ...[
               const SizedBox(height: 10),
@@ -1041,6 +1091,34 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
                         side: BorderSide(color: Colors.orange.withOpacity(0.6)),
                         padding: const EdgeInsets.symmetric(vertical: 9),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // Scan with AI
+                    OutlinedButton.icon(
+                      onPressed: _scanningBins.contains(stop.binId)
+                          ? null
+                          : () => _scanBin(stop),
+                      icon: _scanningBins.contains(stop.binId)
+                          ? const SizedBox(
+                              width: 13, height: 13,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: AppCol.btnbacks))
+                          : const Icon(Icons.smart_toy_outlined,
+                              size: 15, color: AppCol.btnbacks),
+                      label: Text(
+                        _scanningBins.contains(stop.binId)
+                            ? 'Scanning…'
+                            : 'Scan with AI',
+                        style: const TextStyle(
+                            fontSize: 12, color: AppCol.btnbacks),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppCol.btnbacks,
+                        side: const BorderSide(color: AppCol.btnbacks),
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
                   ],

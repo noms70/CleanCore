@@ -3,20 +3,19 @@ import 'dart:io';
 import 'package:cc/services/auth_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cc/services/firestore_service.dart';
+import 'package:cc/utils/colors.dart';
 import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:cc/views/auth/auth_landing_screen.dart';
-
-import 'package:cc/utils/colors.dart';
 import 'package:cc/models/user_model.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
   @override
-  _ProfilePageState createState() => _ProfilePageState();
+  State<ProfilePage> createState() => _ProfilePageState();
 }
 
 class _ProfilePageState extends State<ProfilePage> {
@@ -41,8 +40,6 @@ class _ProfilePageState extends State<ProfilePage> {
     final user = await _firestoreService.getUser(currentUser.uid);
     if (mounted) {
       setState(() {
-        // Fall back to Firebase Auth data when the Firestore document is missing
-        // or was created without these fields.
         _user = user ??
             UserModel(
               uid: currentUser.uid,
@@ -60,26 +57,20 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  String formatFieldName(String fieldName) {
-    List<String> words = fieldName.split(' ');
-    return words
+  String _formatFieldName(String fieldName) {
+    return fieldName
+        .split(' ')
         .asMap()
         .entries
-        .map((entry) {
-          if (entry.key == 0) {
-            return entry.value.toLowerCase();
-          } else {
-            return entry.value[0].toUpperCase() +
-                entry.value.substring(1).toLowerCase();
-          }
-        })
+        .map((e) => e.key == 0
+            ? e.value.toLowerCase()
+            : e.value[0].toUpperCase() + e.value.substring(1).toLowerCase())
         .join('');
   }
 
   void _navigateToEdit(String field, String currentValue) {
-    TextEditingController controller = TextEditingController(
-      text: currentValue,
-    );
+    final controller = TextEditingController(text: currentValue);
+    final scheme = Theme.of(context).colorScheme;
 
     showDialog(
       context: context,
@@ -89,134 +80,134 @@ class _ProfilePageState extends State<ProfilePage> {
           controller: controller,
           decoration: InputDecoration(
             labelText: field,
-            border: OutlineInputBorder(),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text("Cancel"),
+            child: Text("Cancel",
+                style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.6))),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppCol.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
             onPressed: () async {
+              final nav = Navigator.of(context);
               final newValue = controller.text.trim();
               if (newValue.isNotEmpty && newValue != currentValue) {
-                String formattedField = formatFieldName(field);
-                await _firestoreService.updateUser(_user!.uid, {
-                  formattedField: newValue,
-                });
+                await _firestoreService.updateUser(
+                    _user!.uid, {_formatFieldName(field): newValue});
                 showToast('Profile Updated', isError: false);
                 _loadUserData();
               }
-              Navigator.pop(context);
+              nav.pop();
             },
-            child: Text("Save"),
+            child: const Text("Save"),
           ),
         ],
       ),
     );
   }
 
-void _showDeleteAccountDialog() {
-  showDialog(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text("Delete Account"),
-      content: const Text(
-        "Are you sure you want to delete your account? This action cannot be undone. "
-        "All your data will be permanently deleted.",
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text("Cancel"),
+  void _showDeleteAccountDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete Account"),
+        content: const Text(
+          "Are you sure you want to delete your account? This action cannot be undone. "
+          "All your data will be permanently deleted.",
         ),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-          onPressed: () async {
-            Navigator.pop(context); 
-
-            if (_user == null || _user!.uid.isEmpty) {
-              showToast('Error: User not found.', isError: true);
-              return;
-            }
-
-            final uid = _user!.uid;
-
-            try {
-              // Delete Firestore Data
-              await _firestoreService.deleteUserDocument(uid);
-              
-              // Delete the Auth User
-              final authError = await _authService.deleteAccount();
-
-              if (!mounted) return;
-
-              if (authError != null) {
-                // AUTH FAILED
-                showToast(authError, isError: true);
-                
-                // Sign out to force the user to re-authenticate if they want to try again
-                await _authService.signOut();
-                
-                // Use a stable navigation method after sign out
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) {
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(builder: (context) => AuthLandingScreen()),
-                      (Route<dynamic> route) => false,
-                    );
-                  }
-                });
-
-              } else {
-                showToast('Your account has been successfully deleted.');
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) {
-                    Navigator.of(context).pushAndRemoveUntil(
-                      MaterialPageRoute(builder: (context) => AuthLandingScreen()),
-                      (Route<dynamic> route) => false,
-                    );
-                  }
-                });
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(context);
+              if (_user == null || _user!.uid.isEmpty) {
+                showToast('Error: User not found.', isError: true);
+                return;
               }
-            } catch (e) {
-              if (!mounted) return;
-              showToast('Account deletion failed due to an unexpected error. Please try again.', isError: true);
-              print('Full Deletion Error: $e');
-            }
-          },
-          child: const Text("Delete"),
-        ),
-      ],
-    ),
-  );
-}
+              final uid = _user!.uid;
+              try {
+                await _firestoreService.deleteUserDocument(uid);
+                final authError = await _authService.deleteAccount();
+                if (!mounted) return;
+                if (authError != null) {
+                  showToast(authError, isError: true);
+                  await _authService.signOut();
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(
+                            builder: (_) => AuthLandingScreen()),
+                        (route) => false,
+                      );
+                    }
+                  });
+                } else {
+                  showToast('Your account has been successfully deleted.');
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      Navigator.of(context).pushAndRemoveUntil(
+                        MaterialPageRoute(
+                            builder: (_) => AuthLandingScreen()),
+                        (route) => false,
+                      );
+                    }
+                  });
+                }
+              } catch (e) {
+                if (!mounted) return;
+                showToast(
+                    'Account deletion failed. Please try again.',
+                    isError: true);
+              }
+            },
+            child: const Text("Delete",
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
 
- @override
+  @override
   Widget build(BuildContext context) {
-    final Size screenSize = MediaQuery.of(context).size;
+    final isDark       = Theme.of(context).brightness == Brightness.dark;
+    final screenSize   = MediaQuery.of(context).size;
+    // Header strip is always dark navy — consistent in both modes
+    const headerColor  = AppCol.primaryDark;
+    final surfaceColor = isDark ? AppCol.card : Colors.white;
 
     return Scaffold(
-      appBar: AppBuild().buildAppBar(
-        title: 'Personal Profile',
-      ),
+      appBar: AppBuild().buildAppBar(title: 'Personal Profile'),
       body: Container(
-        decoration: BoxDecoration(color: Color(0xFF141C40)),
+        decoration: BoxDecoration(color: headerColor),
         child: Column(
           children: [
             Expanded(
               child: Container(
                 width: screenSize.width,
                 decoration: BoxDecoration(
-                  color: Color(0xFFFCF5FD),
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(35),
+                  color: surfaceColor,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(32),
                   ),
                 ),
                 child: _isLoading
-                    ? _buildShimmerLayout(screenSize)
-                    : _buildProfileContent(screenSize),
+                    ? _buildShimmerLayout(screenSize, isDark)
+                    : _buildProfileContent(screenSize, isDark),
               ),
             ),
           ],
@@ -225,131 +216,93 @@ void _showDeleteAccountDialog() {
     );
   }
 
-  Widget _buildShimmerLayout(Size screenSize) {
+  Widget _buildShimmerLayout(Size screenSize, bool isDark) {
+    final baseColor      = isDark ? AppCol.secondary : Colors.grey[300]!;
+    final highlightColor = isDark ? AppCol.card       : Colors.grey[100]!;
+
     return Shimmer.fromColors(
-      baseColor: Colors.grey[300]!,
-      highlightColor: Colors.grey[100]!,
+      baseColor: baseColor,
+      highlightColor: highlightColor,
       child: ListView(
         padding: EdgeInsets.all(screenSize.width * 0.05),
         children: [
-          Center(
-            child: CircleAvatar(
-              radius: 50,
-              backgroundColor: Colors.white,
-            ),
+          const Center(
+            child: CircleAvatar(radius: 50, backgroundColor: Colors.white),
           ),
-          SizedBox(height: 20),
-          _buildShimmerEditableTile(),
-          _buildShimmerEditableTile(),
-          _buildShimmerEditableTile(),
-          _buildShimmerEditableTile(),
-          Divider(
-            color: Colors.grey.withOpacity(0.4),
-            thickness: 1,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16.0),
-            child: Container(
-              height: 24,
-              width: 200,
-              color: Colors.white,
-            ),
-          ),
-          _buildShimmerListTile(),
-          _buildShimmerListTile(),
+          const SizedBox(height: 20),
+          _shimmerTile(),
+          _shimmerTile(),
+          _shimmerTile(),
+          _shimmerTile(),
+          const Divider(),
+          _shimmerTile(trailing: false),
         ],
       ),
     );
   }
 
-  Widget _buildShimmerEditableTile() {
-    return ListTile(
-      leading: CircleAvatar(backgroundColor: Colors.white, radius: 16),
-      title: Container(
-        height: 16,
-        width: 100,
-        margin: const EdgeInsets.only(bottom: 8.0),
-        color: Colors.white,
-      ),
-      subtitle: Container(
-        height: 14,
-        width: 200,
-        color: Colors.white,
-      ),
-      trailing: Icon(Icons.edit, color: Colors.white),
-    );
-  }
+  Widget _shimmerTile({bool trailing = true}) => ListTile(
+        leading: const CircleAvatar(
+            backgroundColor: Colors.white, radius: 16),
+        title: Container(
+            height: 14,
+            margin: const EdgeInsets.only(bottom: 6),
+            color: Colors.white),
+        subtitle: Container(height: 12, color: Colors.white),
+        trailing: trailing
+            ? const Icon(Icons.edit, color: Colors.white)
+            : const Icon(Icons.arrow_forward_ios, color: Colors.white),
+      );
 
-  Widget _buildShimmerListTile() {
-    return ListTile(
-      leading: CircleAvatar(backgroundColor: Colors.white, radius: 16),
-      title: Container(
-        height: 16,
-        width: 150,
-        color: Colors.white,
-      ),
-      trailing: Icon(Icons.arrow_forward_ios, color: Colors.white),
-    );
-  }
+  Widget _buildProfileContent(Size screenSize, bool isDark) {
+    final scheme = Theme.of(context).colorScheme;
 
-  Widget _buildProfileContent(Size screenSize) {
     return ListView(
       padding: EdgeInsets.all(screenSize.width * 0.05),
       children: [
-        _buildProfilePicture(),
-        SizedBox(height: 20),
+        _buildProfilePicture(scheme),
+        const SizedBox(height: 24),
         _buildEditableTile(
+          context: context,
           title: "First Name",
           value: _user?.firstName ?? 'Unknown',
-          icon: Icons.person,
-          onEdit: () => _navigateToEdit(
-            "First Name",
-            _user?.firstName ?? 'Unknown',
-          ),
+          icon: Icons.person_rounded,
+          onEdit: () => _navigateToEdit("First Name", _user?.firstName ?? ''),
         ),
         _buildEditableTile(
+          context: context,
           title: "Last Name",
           value: _user?.lastName ?? 'Unknown',
-          icon: Icons.person,
-          onEdit: () => _navigateToEdit(
-            "Last Name",
-            _user?.lastName ?? 'Unknown',
-          ),
+          icon: Icons.person_rounded,
+          onEdit: () => _navigateToEdit("Last Name", _user?.lastName ?? ''),
         ),
         _buildEditableTile(
+          context: context,
           title: "Email",
           value: (_user?.email.isNotEmpty == true)
               ? _user!.email
               : (_authService.currentUser?.email ?? 'Unknown'),
-          icon: Icons.email,
+          icon: Icons.email_rounded,
           onEdit: null,
         ),
         _buildEditableTile(
+          context: context,
           title: "Phone Number",
           value: _user?.phoneNumber ?? 'Not set',
-          icon: Icons.phone,
-          onEdit: () => _navigateToEdit(
-            "Phone Number",
-            _user?.phoneNumber ?? '',
-          ),
+          icon: Icons.phone_rounded,
+          onEdit: () =>
+              _navigateToEdit("Phone Number", _user?.phoneNumber ?? ''),
         ),
-        Divider(
-          color: Colors.grey.withOpacity(0.4),
-          thickness: 1,
-        ),
-        _buildSectionHeader("Account Management"),
-        _buildListTile(
-          icon: Icons.delete,
-          title: "Delete Account",
-          onTap: _showDeleteAccountDialog,
-        ),
+        Divider(color: Theme.of(context).dividerColor, height: 32),
+        _buildSectionHeader(context, "Account Management"),
+        _buildDangerTile(context),
       ],
     );
   }
 
-  Widget _buildProfilePicture() {
+  Widget _buildProfilePicture(ColorScheme scheme) {
     final profilePic = _user?.profilePicture;
-    final initials = _user?.firstName.isNotEmpty == true
+    final initials   = _user?.firstName.isNotEmpty == true
         ? _user!.firstName[0].toUpperCase()
         : '?';
 
@@ -360,77 +313,58 @@ void _showDeleteAccountDialog() {
       } else {
         try {
           backgroundImage = MemoryImage(base64Url.decode(profilePic));
-        } catch (e) {
-          print("Error decoding base64 image: $e");
-          backgroundImage = null;
-        }
+        } catch (_) {}
       }
     }
 
-    return Container(
-      width: 110,
-      height: 110,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          colors: [Color(0xFF2AF297), Colors.tealAccent],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 10,
-            offset: Offset(0, 5),
-          ),
-        ],
-      ),
+    return Center(
       child: Stack(
-        alignment: Alignment.center,
         children: [
-          CircleAvatar(
-            radius: 50,
-            backgroundColor: Colors.grey[300],
-            backgroundImage: backgroundImage,
-            child: (backgroundImage == null)
-                ? Text(
-                    initials,
-                    style: const TextStyle(
-                      fontSize: 40,
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  )
-                : null,
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Container(
-              width: 110,
-              height: 55,
-              decoration: BoxDecoration(
-                color: Color(0x5F101010),
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(55),
-                ),
+          Container(
+            width: 110,
+            height: 110,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                colors: [AppCol.primary, AppCol.accent],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-              child: InkWell(
-                onTap: _updateProfilePicture,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.edit, color: Colors.black45, size: 20),
-                    const SizedBox(height: 4),
-                    Text(
-                      "Edit",
-                      style: TextStyle(
-                        color: Colors.black45,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
+              boxShadow: [
+                BoxShadow(
+                  color: AppCol.primary.withValues(alpha: 0.4),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
                 ),
+              ],
+            ),
+            child: CircleAvatar(
+              radius: 52,
+              backgroundColor: Colors.transparent,
+              backgroundImage: backgroundImage,
+              child: backgroundImage == null
+                  ? Text(initials,
+                      style: const TextStyle(
+                          fontSize: 40,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold))
+                  : null,
+            ),
+          ),
+          Positioned(
+            bottom: 0,
+            right: 0,
+            child: GestureDetector(
+              onTap: _updateProfilePicture,
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: const BoxDecoration(
+                  color: AppCol.primary,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.edit_rounded,
+                    color: Colors.white, size: 16),
               ),
             ),
           ),
@@ -439,83 +373,103 @@ void _showDeleteAccountDialog() {
     );
   }
 
-  Widget _buildSectionHeader(String title) {
+  Widget _buildSectionHeader(BuildContext context, String title) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16.0),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         title,
-        style: TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          color: Color(0xFF5B2245),
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: AppCol.primary,
+          letterSpacing: 1.0,
         ),
       ),
     );
   }
 
-  Widget _buildListTile({
-    required IconData icon,
+  Widget _buildEditableTile({
+    required BuildContext context,
     required String title,
-    required Function onTap,
+    required String value,
+    required IconData icon,
+    VoidCallback? onEdit,
   }) {
+    final scheme = Theme.of(context).colorScheme;
     return ListTile(
-      leading: Icon(icon, color: Color(0xFF5B2245), size: 32),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: AppCol.primary.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: AppCol.primary, size: 20),
+      ),
       title: Text(
         title,
         style: TextStyle(
-          fontSize: 16,
+          fontSize: 12,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF5B2245),
+          color: scheme.onSurface.withValues(alpha: 0.5),
+          letterSpacing: 0.5,
         ),
       ),
-      onTap: () => onTap(),
-      trailing: Icon(Icons.arrow_forward_ios, color: Color(0xFF5B2245)),
+      subtitle: Text(
+        value,
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: scheme.onSurface,
+        ),
+      ),
+      trailing: onEdit != null
+          ? IconButton(
+              icon: Icon(Icons.edit_rounded,
+                  color: AppCol.primary.withValues(alpha: 0.7), size: 20),
+              onPressed: onEdit,
+            )
+          : null,
+    );
+  }
+
+  Widget _buildDangerTile(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: Colors.red.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child:
+            const Icon(Icons.delete_rounded, color: Colors.redAccent, size: 22),
+      ),
+      title: const Text("Delete Account",
+          style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Colors.redAccent)),
+      trailing: Icon(Icons.chevron_right_rounded,
+          color: Colors.redAccent.withValues(alpha: 0.5), size: 20),
+      onTap: _showDeleteAccountDialog,
     );
   }
 
   Future<void> _updateProfilePicture() async {
     try {
-      final picker = ImagePicker();
+      final picker    = ImagePicker();
       final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
       if (pickedFile != null) {
         final imageFile = File(pickedFile.path);
         await _firestoreService.uploadProfilePicture(_user!.uid, imageFile);
-        showToast('Profile picture updated successfully', isError: false);
+        showToast('Profile picture updated successfully');
         _loadUserData();
       }
     } catch (e) {
-      print('Failed to update profile picture: $e');
-      showToast('Failed to update profile picture: $e');
+      showToast('Failed to update profile picture', isError: true);
     }
-  }
-
-  Widget _buildEditableTile({
-    required String title,
-    required String value,
-    required IconData icon,
-    Function? onEdit,
-  }) {
-    return ListTile(
-      leading: Icon(icon, color: Color(0xFF5B2245), size: 32),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF5B2245),
-        ),
-      ),
-      subtitle: Text(
-        value,
-        style: TextStyle(fontSize: 14, color: Colors.black.withOpacity(0.6)),
-      ),
-      trailing: onEdit != null
-          ? IconButton(
-              icon: Icon(Icons.edit, color: Color(0xFF5B2245)),
-              onPressed: () => onEdit(),
-            )
-          : null,
-    );
   }
 }
