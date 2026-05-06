@@ -27,16 +27,23 @@ void main() async {
       await messaging.requestPermission();
       String? token = await messaging.getToken();
       if (token != null) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .set({'fcmToken': token}, SetOptions(merge: true));
+        try {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .update({'fcmToken': token});
+        } catch (_) {
+          // Document doesn't exist yet (new signup in progress) — skip.
+          // The token will be saved on the next auth event once the document exists.
+        }
       }
-      messaging.onTokenRefresh.listen((newToken) {
-        FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .set({'fcmToken': newToken}, SetOptions(merge: true));
+      messaging.onTokenRefresh.listen((newToken) async {
+        try {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .update({'fcmToken': newToken});
+        } catch (_) {}
       });
     }
   });

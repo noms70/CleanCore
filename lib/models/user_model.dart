@@ -20,6 +20,10 @@ class UserModel {
   final String assignedArea;
   final String assignedWasteType;
 
+  // Counters — incremented by admin/functions, initialised to 0 at signup
+  final int routes;
+  final int collections;
+
   UserModel({
     required this.uid,
     required this.email,
@@ -34,6 +38,8 @@ class UserModel {
     this.lng = 0.0,
     this.assignedArea = '',
     this.assignedWasteType = '',
+    this.routes = 0,
+    this.collections = 0,
   });
 
   bool get isWorker => role == 'worker';
@@ -54,6 +60,8 @@ class UserModel {
       'lng':               lng,
       'assignedArea':      assignedArea,
       'assignedWasteType': assignedWasteType,
+      'routes':            routes,
+      'collections':       collections,
     };
   }
 
@@ -73,6 +81,8 @@ class UserModel {
       lng:               ((data['lng'] ?? 0.0) as num).toDouble(),
       assignedArea:      data['assignedArea'] as String?      ?? '',
       assignedWasteType: data['assignedWasteType'] as String? ?? '',
+      routes:            (data['routes'] as num?)?.toInt()      ?? 0,
+      collections:       (data['collections'] as num?)?.toInt() ?? 0,
     );
   }
 }

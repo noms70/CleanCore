@@ -112,8 +112,10 @@ class _VerificationPageState extends State<VerificationPage> {
       if (user != null && user.emailVerified) {
         _timer?.cancel();
 
-        final firestoreUser = await _firestoreService.getUser(user.uid);
-        if (firestoreUser == null) {
+        // Always write the full document so partial docs (e.g. from FCM writes)
+        // never leave a new user with missing fields.
+        final existingUser = await _firestoreService.getUser(user.uid);
+        if (existingUser == null) {
           final newUser = UserModel(
             uid: user.uid,
             email: user.email ?? '',
