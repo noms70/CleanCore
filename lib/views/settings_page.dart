@@ -2,7 +2,6 @@ import 'package:cc/services/auth_service.dart';
 import 'package:cc/utils/colors.dart';
 import 'package:cc/utils/theme_service.dart';
 import 'package:cc/views/auth/auth_landing_screen.dart';
-import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
 import '../widgets/navbar.dart';
 import 'profile_page.dart';
@@ -31,9 +30,16 @@ class _SettingsPageState extends State<SettingsPage> {
     final surfaceColor = isDark ? AppCol.card : Colors.white;
 
     return Scaffold(
-      appBar: AppBuild().buildAppBar(
-        title: 'Settings',
-        icon: Icons.settings_rounded,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: AppCol.primaryDark,
+        elevation: 0,
+        toolbarHeight: 80,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(40)),
+        ),
+        centerTitle: true,
+        title: Image.asset('assets/app_logo_2.png', height: 72, fit: BoxFit.contain),
       ),
       body: SafeArea(
         child: Container(
