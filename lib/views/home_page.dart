@@ -4,7 +4,6 @@ import 'dart:math';
 
 
 import 'package:cc/models/user_model.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:cc/services/auth_service.dart';
 import 'package:cc/services/firestore_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -318,9 +317,16 @@ class _HomePageState extends State<HomePage> {
             : route.routeId;
         estimatedFuel = route.estimatedFuel;
         currentStatus = 'On Route';
-        // Rough ETA: assume 2 min per remaining stop
+        // ETA = remaining travel time + collection time per stop.
+        // Travel: scale total route km by fraction of stops remaining,
+        //         then divide by 25 km/h average city speed.
+        // Collection: 5 min per remaining stop (bin swap + loading).
         final remaining = route.totalStops - route.completedStops;
-        final mins = remaining * 2;
+        final fraction  = route.totalStops > 0 ? remaining / route.totalStops : 0.0;
+        final remKm     = route.totalDistanceKm * fraction;
+        final travelMins = (remKm / 25.0 * 60).round();
+        final collectMins = remaining * 5;
+        final mins = travelMins + collectMins;
         estimatedTime = mins >= 60
             ? '${mins ~/ 60}h ${mins % 60}m'
             : '${mins}m';
@@ -328,41 +334,36 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  static const double _proximityRadiusM = 10000; // must match map_page
+  /// Count critical bins visible to this worker (area-scoped).
+  bool _criticalAreaMatches(String binArea, String workerArea) {
+    final b = binArea.toLowerCase();
+    final w = workerArea.toLowerCase();
+    return b == w || b.endsWith(', $w');
+  }
 
-  /// Count critical bins visible to this worker (area-scoped or proximity-based).
   void _subscribeToBinStats() {
     _binsSub = _db.collection('bins').snapshots().listen((snap) {
       if (!mounted) return;
-      final workerArea  = _user?.assignedArea ?? '';
-      final workerWaste = (_user?.assignedWasteType ?? '').toLowerCase();
-      final userLat     = _user?.lat ?? 0.0;
-      final userLng     = _user?.lng ?? 0.0;
+      // Don't count until the user profile is loaded — first snapshot fires
+      // before _user is set, which would use empty area and count everything.
+      if (_isLoadingUserData) return;
+
+      final workerArea  = (_user?.assignedArea ?? '').trim();
+      final workerWaste = (_user?.assignedWasteType ?? '').toLowerCase().trim();
+
+      // No assigned area → show 0. Proximity is too broad for a dashboard
+      // count — a worker should only see bins they're responsible for.
+      if (workerArea.isEmpty) {
+        setState(() => criticalBinsNearby = 0);
+        return;
+      }
 
       final critical = snap.docs.where((d) {
-        final data   = d.data();
-        final fill   = (data['fillLevel'] ?? data['fill_level'] ?? 0) as num;
-        final status = (data['status'] ?? '').toString().toLowerCase();
+        final data    = d.data();
+        final fill    = (data['fillLevel'] ?? data['fill_level'] ?? 0) as num;
+        final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
 
-        if (workerArea.isNotEmpty) {
-          final binArea = (data['area'] ?? data['sector'] ?? '').toString();
-          if (binArea != workerArea) return false;
-        } else if (userLat != 0.0 && userLng != 0.0) {
-          // No area assigned — fall back to proximity using stored coordinates.
-          final binLat = (data['lat'] as num?)?.toDouble()
-              ?? (data['location'] is GeoPoint
-                  ? (data['location'] as GeoPoint).latitude
-                  : null);
-          final binLng = (data['lng'] as num?)?.toDouble()
-              ?? (data['location'] is GeoPoint
-                  ? (data['location'] as GeoPoint).longitude
-                  : null);
-          if (binLat != null && binLng != null) {
-            final distM = Geolocator.distanceBetween(
-                userLat, userLng, binLat, binLng);
-            if (distM > _proximityRadiusM) return false;
-          }
-        }
+        if (!_criticalAreaMatches(binArea, workerArea)) return false;
 
         if (workerWaste.isNotEmpty) {
           final binWaste =
@@ -370,7 +371,7 @@ class _HomePageState extends State<HomePage> {
           if (binWaste != workerWaste) return false;
         }
 
-        return fill >= 90 || status == 'critical' || status == 'full';
+        return fill >= 90;
       }).length;
       setState(() => criticalBinsNearby = critical);
     });
@@ -386,6 +387,10 @@ class _HomePageState extends State<HomePage> {
           _isLoadingUserData = false;
           _updateGreeting();
         });
+        // Re-subscribe now that we have the worker's area — the first snapshot
+        // fired before user loaded used an empty area and counted all nearby bins.
+        _binsSub?.cancel();
+        _subscribeToBinStats();
       }
     }
   }

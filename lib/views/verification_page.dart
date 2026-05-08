@@ -5,6 +5,7 @@ import 'package:cc/models/user_model.dart';
 import 'package:cc/services/firestore_service.dart';
 import 'package:cc/utils/colors.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 import 'home_page.dart';
 import 'dart:async';
 
@@ -46,7 +47,7 @@ class _VerificationPageState extends State<VerificationPage> {
     super.dispose();
   }
 
-  /// Silently fetch device GPS and persist it on the user's Firestore document.
+  /// Silently fetch device GPS, reverse-geocode to city, and persist on the user's Firestore document.
   Future<void> _saveLocationIfAvailable(String uid) async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -64,10 +65,19 @@ class _VerificationPageState extends State<VerificationPage> {
         timeLimit: const Duration(seconds: 8),
       );
 
+      String city = '';
+      try {
+        final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+        if (placemarks.isNotEmpty) {
+          city = placemarks.first.locality ?? placemarks.first.subAdministrativeArea ?? '';
+        }
+      } catch (_) {}
+
       await _firestoreService.updateUser(uid, {
         'lat': pos.latitude,
         'lng': pos.longitude,
         'locationUpdatedAt': Timestamp.now(),
+        if (city.isNotEmpty) 'assignedArea': city,
       });
     } catch (_) {
       // Location unavailable — not a blocking error

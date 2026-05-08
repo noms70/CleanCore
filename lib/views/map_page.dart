@@ -11,7 +11,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'package:cc/utils/colors.dart';
 import '../models/models.dart';
@@ -62,6 +61,15 @@ class _MapPageState extends State<MapPage> {
   String _assignedArea = '';
   String _assignedWasteType = '';
 
+  // Depot coordinates from the worker's Firestore profile.
+  // Used to re-center the map when the worker has an assignedArea but their
+  // live GPS is far away (e.g. seeded demo workers logging in from another city).
+  double _depotLat = 0.0;
+  double _depotLng = 0.0;
+  // Set to true once the profile is loaded with a non-empty assignedArea so
+  // _onMapCreated can trigger the re-center if the controller wasn't ready yet.
+  bool _pendingDepotCenter = false;
+
   // ── Active route (live from Firestore 'routes' collection) ────────────────
   ActiveRoute? _activeRoute;
 
@@ -96,9 +104,8 @@ class _MapPageState extends State<MapPage> {
     _polylinePoints = PolylinePoints(apiKey: '');
     _bins = List.from(widget.binLocations);
     _setupMap();
-    _loadProfileThenSubscribeToBins(); // loads assignment filters first
+    _loadProfileThenSubscribeToBins(); // loads assignment filters first, then starts urgent-bin listener
     _subscribeToActiveRoute();
-    _subscribeToUrgentBins();
   }
 
   @override
@@ -147,10 +154,37 @@ class _MapPageState extends State<MapPage> {
           final d = doc.data()!;
           _assignedArea      = (d['assignedArea']      as String? ?? '').trim();
           _assignedWasteType = (d['assignedWasteType'] as String? ?? '').trim();
+          _depotLat          = (d['lat']  as num?)?.toDouble() ?? 0.0;
+          _depotLng          = (d['lng']  as num?)?.toDouble() ?? 0.0;
         }
       } catch (_) {}
     }
     _subscribeToBins();
+    // Start urgent-bin alerts only after the worker's area is known so the
+    // filter has the correct assignedArea from the first snapshot.
+    _subscribeToUrgentBins();
+
+    // If the worker has an assigned area, move the camera to their stored
+    // depot location so seeded demo workers (physically elsewhere) can see
+    // their assigned-area bins without having to scroll the map.
+    if (_assignedArea.isNotEmpty && _depotLat != 0.0 && _depotLng != 0.0) {
+      _centerOnDepot();
+    }
+  }
+
+  // Animates the map camera to the worker's depot coordinates.
+  // If the map controller isn't ready yet, sets a flag so _onMapCreated
+  // can trigger the animation once the controller is available.
+  void _centerOnDepot() {
+    if (_mapController != null) {
+      _mapController!.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(target: LatLng(_depotLat, _depotLng), zoom: 14.5),
+        ),
+      );
+    } else {
+      _pendingDepotCenter = true;
+    }
   }
 
   // ── Firestore: live bin updates (filtered by worker assignment) ───────────
@@ -188,7 +222,7 @@ class _MapPageState extends State<MapPage> {
 
       if (_assignedArea.isNotEmpty) {
         final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
-        if (binArea != _assignedArea) return false;
+        if (!_areaMatches(binArea, _assignedArea)) return false;
       } else if (_currentPosition != null) {
         final distM = Geolocator.distanceBetween(
           _currentPosition!.latitude,
@@ -210,6 +244,16 @@ class _MapPageState extends State<MapPage> {
 
       return true;
     }).map((d) => BinLocation.fromFirestore(d)).toList();
+  }
+
+  // True if a bin's area belongs to the worker's assigned area.
+  // Handles city-level assignments: worker "Lahore" sees bins labelled
+  // "Wahdat Colony, Lahore" or "DHA, Lahore" because the bin area ends
+  // with ", Lahore". Exact match always passes too.
+  bool _areaMatches(String binArea, String workerArea) {
+    final b = binArea.trim().toLowerCase();
+    final w = workerArea.trim().toLowerCase();
+    return b == w || b.endsWith(', $w');
   }
 
   double? _getBinLat(Map<String, dynamic> data) {
@@ -261,7 +305,15 @@ class _MapPageState extends State<MapPage> {
         ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
         : LatLng(widget.driverLat, widget.driverLng);
 
-    final pending = _activeRoute!.stops.where((s) => !s.completed).toList();
+    // Only navigate to stops whose bin is currently visible on this worker's
+    // map. Bins may be invisible because they were deleted or are outside the
+    // worker's assigned area — skip them so the polyline never leads somewhere
+    // the worker can't see.
+    final visibleBinIds = _bins.map((b) => b.id).toSet();
+    final pending = _activeRoute!.stops
+        .where((s) => !s.completed)
+        .where((s) => visibleBinIds.isEmpty || visibleBinIds.contains(s.binId))
+        .toList();
     if (pending.isEmpty) {
       if (mounted) setState(() => _polylines.clear());
       return;
@@ -299,9 +351,11 @@ class _MapPageState extends State<MapPage> {
         Polyline(
           polylineId: const PolylineId('active_route'),
           points: coords,
-          color: AppCol.btnbacks,
-          width: 5,
-          patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+          color: AppCol.accent,
+          width: 8,
+          jointType: JointType.round,
+          endCap: Cap.roundCap,
+          startCap: Cap.roundCap,
         ),
       };
     });
@@ -319,6 +373,8 @@ class _MapPageState extends State<MapPage> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
+      // Don't fire any alerts until we know where the worker is.
+      if (_assignedArea.isEmpty && _currentPosition == null) return;
       for (final doc in snap.docChanges) {
         // Only react to newly added or modified-to-urgent bins
         if (doc.type == DocumentChangeType.added ||
@@ -388,12 +444,21 @@ class _MapPageState extends State<MapPage> {
 
   void _generateMarkers() {
     final markers = <Marker>{};
+    final completedBinIds = _activeRoute?.stops
+            .where((s) => s.completed)
+            .map((s) => s.binId)
+            .toSet() ??
+        {};
+
     for (final bin in _bins) {
-      final hue = bin.isCritical
-          ? BitmapDescriptor.hueRed
-          : bin.fullness > 70
-              ? BitmapDescriptor.hueYellow
-              : BitmapDescriptor.hueGreen;
+      final isCollected = completedBinIds.contains(bin.id) || bin.fullness == 0;
+      final hue = isCollected
+          ? BitmapDescriptor.hueGreen
+          : bin.isCritical
+              ? BitmapDescriptor.hueRed
+              : bin.fullness > 70
+                  ? BitmapDescriptor.hueYellow
+                  : BitmapDescriptor.hueGreen;
       markers.add(Marker(
         markerId: MarkerId(bin.id),
         position: LatLng(bin.lat, bin.lng),
@@ -408,7 +473,13 @@ class _MapPageState extends State<MapPage> {
     setState(() => _markers = markers);
   }
 
-  void _onMapCreated(GoogleMapController c) => _mapController = c;
+  void _onMapCreated(GoogleMapController c) {
+    _mapController = c;
+    if (_pendingDepotCenter) {
+      _pendingDepotCenter = false;
+      _centerOnDepot();
+    }
+  }
 
   void _recenterMap() async {
     try {
@@ -427,53 +498,6 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  void _createPolyline(BinLocation bin) async {
-    final origin = _currentPosition != null
-        ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
-        : LatLng(widget.driverLat, widget.driverLng);
-    final dest = LatLng(bin.lat, bin.lng);
-
-    final url = 'http://router.project-osrm.org/route/v1/driving/'
-        '${origin.longitude},${origin.latitude};'
-        '${dest.longitude},${dest.latitude}'
-        '?overview=full&geometries=polyline';
-
-    var coords = <LatLng>[];
-    try {
-      final res = await http.get(Uri.parse(url));
-      if (res.statusCode == 200) {
-        final encoded = json.decode(res.body)['routes'][0]['geometry'] as String;
-        coords = PolylinePoints.decodePolyline(encoded)
-            .map((p) => LatLng(p.latitude, p.longitude))
-            .toList();
-      }
-    } catch (_) {}
-
-    if (coords.isEmpty) coords = [origin, dest];
-
-    setState(() {
-      _polylines = {
-        Polyline(
-          polylineId: const PolylineId('route_to_bin'),
-          points: coords,
-          color: AppCol.btnbacks,
-          width: 5,
-        ),
-      };
-    });
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLngBounds(_bounds([origin, dest]), 100),
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Route to ${bin.id}'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
-  }
-
   LatLngBounds _bounds(List<LatLng> pts) {
     double minLat = pts[0].latitude, maxLat = pts[0].latitude;
     double minLng = pts[0].longitude, maxLng = pts[0].longitude;
@@ -487,18 +511,6 @@ class _MapPageState extends State<MapPage> {
       southwest: LatLng(minLat, minLng),
       northeast: LatLng(maxLat, maxLng),
     );
-  }
-
-  // ── Open stop in Google Maps via geo: deep link ───────────────────────────
-  Future<void> _openInGoogleMaps(BinLocation bin) async {
-    final uri      = Uri.parse('geo:${bin.lat},${bin.lng}?q=${bin.lat},${bin.lng}');
-    final fallback = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=${bin.lat},${bin.lng}');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      await launchUrl(fallback, mode: LaunchMode.externalApplication);
-    }
   }
 
   // ── Mark bin as collected ─────────────────────────────────────────────────
@@ -543,6 +555,71 @@ class _MapPageState extends State<MapPage> {
         ),
       );
     }
+  }
+
+  // ── View latest bin image stored in Firestore ────────────────────────────
+  Future<void> _viewBinImage(BinLocation bin) async {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+        contentPadding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Bin ${bin.id.length > 14 ? '${bin.id.substring(0, 14)}…' : bin.id}',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(ctx),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+        ),
+        content: FutureBuilder<DocumentSnapshot>(
+          future: _db.collection('bins').doc(bin.id).get(),
+          builder: (ctx, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const SizedBox(
+                height: 180,
+                child: Center(child: CircularProgressIndicator(color: AppCol.btnbacks)),
+              );
+            }
+            final data = snap.data?.data() as Map<String, dynamic>?;
+            final preview = data?['imagePreview'] as String? ?? '';
+            if (preview.isEmpty) {
+              return const SizedBox(
+                height: 100,
+                child: Center(
+                  child: Text(
+                    'No image available.\nScan this bin with AI to capture one.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                ),
+              );
+            }
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(
+                base64Decode(preview),
+                fit: BoxFit.contain,
+              ),
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: AppCol.btnbacks)),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Image source picker (camera or gallery) ──────────────────────────────
@@ -615,13 +692,20 @@ class _MapPageState extends State<MapPage> {
     if (!mounted) return;
     setState(() => _scanning = false);
 
-    if (result != null) {
+    if (result != null && result['error'] != 'no_bin_detected') {
       final fill = result['results']?['fill_level']?['value'] ?? 0;
-      final waste = result['results']?['fill_level']?['status'] ?? '—';
+      final status = result['fillStatus'] ?? '—';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Scanned: $fill% full · $waste'),
+          content: Text('Scanned: $fill% full · $status'),
           backgroundColor: Colors.teal,
+        ),
+      );
+    } else if (result != null && result['error'] == 'no_bin_detected') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No bin detected. Hold the camera closer and try again.'),
+          backgroundColor: Colors.orange,
         ),
       );
     } else {
@@ -786,7 +870,7 @@ class _MapPageState extends State<MapPage> {
               child: LinearProgressIndicator(
                 value: bin.fullness / 100,
                 minHeight: 8,
-                backgroundColor: AppCol.btnbacks.withOpacity(0.2),
+                backgroundColor: AppCol.btnbacks.withValues(alpha: 0.2),
                 valueColor: AlwaysStoppedAnimation<Color>(
                   bin.isCritical ? Colors.red : AppCol.btnbacks,
                 ),
@@ -824,9 +908,9 @@ class _MapPageState extends State<MapPage> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.1),
+                  color: Colors.green.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.withOpacity(0.4)),
+                  border: Border.all(color: Colors.green.withValues(alpha: 0.4)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -886,6 +970,22 @@ class _MapPageState extends State<MapPage> {
                   ),
                   const SizedBox(height: 8),
 
+                  // View stored bin image
+                  OutlinedButton.icon(
+                    onPressed: () => _viewBinImage(bin),
+                    icon: const Icon(Icons.image_outlined),
+                    label: const Text('View Bin'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppCol.btnbacks,
+                      side: BorderSide(color: AppCol.btnbacks),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+
                   // Mark Complete (disabled if already done)
                   ElevatedButton.icon(
                     onPressed: _isBinCompleted(bin.id) ? null : () => _markCollected(bin),
@@ -920,7 +1020,7 @@ class _MapPageState extends State<MapPage> {
                         style: TextStyle(color: Colors.orange)),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.orange,
-                      side: BorderSide(color: Colors.orange.withOpacity(0.6)),
+                      side: BorderSide(color: Colors.orange.withValues(alpha: 0.6)),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
@@ -973,9 +1073,18 @@ class _MapPageState extends State<MapPage> {
 
   Widget _buildBinTile(BinLocation bin) {
     final isSelected = _selectedBin?.id == bin.id;
-    final tileColor = bin.isCritical ? Colors.red : Colors.green;
+    final tileColor = bin.fullness >= 90
+        ? Colors.red
+        : bin.fullness >= 70
+            ? Colors.orange
+            : Colors.green;
     return GestureDetector(
-      onTap: () => _showBinDetails(bin),
+      onTap: () {
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(LatLng(bin.lat, bin.lng), 17.0),
+        );
+        _showBinDetails(bin);
+      },
       child: Container(
         width: 110,
         margin: const EdgeInsets.only(right: 10),
@@ -983,12 +1092,12 @@ class _MapPageState extends State<MapPage> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected ? AppCol.btnbacks : tileColor.withOpacity(0.3),
+            color: isSelected ? AppCol.btnbacks : tileColor.withValues(alpha: 0.3),
             width: isSelected ? 2 : 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -1001,7 +1110,7 @@ class _MapPageState extends State<MapPage> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: tileColor.withOpacity(0.2),
+                color: tileColor.withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
               child: Icon(Icons.delete_outline, color: tileColor, size: 20),
@@ -1052,6 +1161,40 @@ class _MapPageState extends State<MapPage> {
                       padding: const EdgeInsets.only(bottom: 10),
                     ),
 
+                    // ── My Route button — full-width at the top ──────────
+                    Positioned(
+                      top: MediaQuery.of(context).padding.top + 10,
+                      left: 16,
+                      right: 16,
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const RouteJobScreen()),
+                        ),
+                        icon: const Icon(Icons.list_alt_rounded, size: 20, color: AppCol.primaryDark),
+                        label: Text(
+                          _activeRoute != null
+                              ? 'My Route  •  ${_activeRoute!.completedStops}/${_activeRoute!.totalStops} stops'
+                              : 'My Route',
+                          style: const TextStyle(
+                            color: AppCol.primaryDark,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppCol.primary,
+                          elevation: 6,
+                          shadowColor: AppCol.primary.withValues(alpha: 0.5),
+                          minimumSize: const Size(double.infinity, 50),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
+
                     // Re-center FAB
                     Positioned(
                       right: 16,
@@ -1065,26 +1208,10 @@ class _MapPageState extends State<MapPage> {
                       ),
                     ),
 
-                    // My Route FAB — opens RouteJobScreen
-                    Positioned(
-                      right: 16,
-                      bottom: 300,
-                      child: FloatingActionButton.extended(
-                        heroTag: 'my_route_btn',
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const RouteJobScreen()),
-                        ),
-                        backgroundColor: AppCol.btnbacks,
-                        icon: const Icon(Icons.list_alt, color: Colors.white),
-                        label: const Text('My Route', style: TextStyle(color: Colors.white, fontSize: 12)),
-                      ),
-                    ),
-
                     // Route progress banner (shown when active route exists)
                     if (_activeRoute != null)
                       Positioned(
-                        top: MediaQuery.of(context).padding.top + 8,
+                        top: MediaQuery.of(context).padding.top + 72,
                         left: 16,
                         right: 16,
                         child: Container(
@@ -1095,7 +1222,7 @@ class _MapPageState extends State<MapPage> {
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.15),
+                                color: Colors.black.withValues(alpha: 0.15),
                                 blurRadius: 8,
                                 offset: const Offset(0, 3),
                               ),
@@ -1122,7 +1249,7 @@ class _MapPageState extends State<MapPage> {
                                       value: _activeRoute!.progressFraction,
                                       minHeight: 4,
                                       backgroundColor:
-                                          AppCol.btnbacks.withOpacity(0.2),
+                                          AppCol.btnbacks.withValues(alpha: 0.2),
                                       valueColor:
                                           const AlwaysStoppedAnimation<Color>(
                                               AppCol.btnbacks),
@@ -1210,7 +1337,7 @@ class _MapPageState extends State<MapPage> {
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.2),
+                                      color: Colors.white.withValues(alpha: 0.2),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: const Text(

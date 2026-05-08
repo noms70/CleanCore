@@ -384,17 +384,27 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
       final result = await _api.analyzeBin(
         imageBytes: bytes,
         imageName:  'bin_${stop.binId}.jpg',
+        binId:      stop.binId,  // update existing bin doc, not create new
+        area:       stop.area,   // preserve area so bin stays in correct routing pool
         lat:        stop.lat,
         lng:        stop.lng,
       );
 
       if (!mounted) return;
+      final notDetected = result != null && result['error'] == 'no_bin_detected';
       setState(() {
         _scanningBins.remove(stop.binId);
-        if (result != null) _scanResults[stop.binId] = result;
+        if (result != null && !notDetected) _scanResults[stop.binId] = result;
       });
 
-      if (result == null) {
+      if (notDetected) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No bin detected. Hold the camera closer and try again.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      } else if (result == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('AI scan failed. Check connection and try again.'),

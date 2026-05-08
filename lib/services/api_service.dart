@@ -75,6 +75,10 @@ class ApiService {
       if (response.statusCode == 200) {
         return json.decode(response.body) as Map<String, dynamic>;
       }
+      // 422 = backend detected no bin — tell the caller explicitly
+      if (response.statusCode == 422) {
+        return {'success': false, 'error': 'no_bin_detected'};
+      }
       _log('analyzeBin', response.statusCode, response.body);
       return null;
     } catch (e) {

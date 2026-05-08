@@ -5,6 +5,8 @@ import 'package:cc/utils/colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 class AuthService {
@@ -17,6 +19,34 @@ class AuthService {
 
   /// Get the current Firebase user.
   User? get currentUser => _firebaseAuth.currentUser;
+
+  /// Silently get the city name from the device's current GPS position.
+  Future<String> _getCityFromLocation() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return '';
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) return '';
+
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 8),
+        ),
+      );
+
+      final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+      if (placemarks.isNotEmpty) {
+        return placemarks.first.locality ?? placemarks.first.subAdministrativeArea ?? '';
+      }
+    } catch (_) {}
+    return '';
+  }
 
   // Helper to return user-friendly error messages
   String _handleAuthException(FirebaseAuthException e) {
@@ -50,12 +80,33 @@ class AuthService {
         return "Please verify your email address before logging in.";
       }
 
+      // Backfill assignedArea from GPS city if it was never set (fire-and-forget)
+      if (user != null) _backfillAssignedAreaIfEmpty(user.uid);
+
       return null; // success
     } on FirebaseAuthException catch (e) {
       return _handleAuthException(e);
     } catch (e) {
       return "An unexpected error occurred: $e";
     }
+  }
+
+  /// If the user's assignedArea is empty, silently populate it from GPS city.
+  void _backfillAssignedAreaIfEmpty(String uid) async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (!doc.exists) return;
+      final area = (doc.data()?['assignedArea'] as String? ?? '').trim();
+      if (area.isNotEmpty) return;
+
+      final city = await _getCityFromLocation();
+      if (city.isEmpty) return;
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .update({'assignedArea': city});
+    } catch (_) {}
   }
 
   /// Creates a new user and sends verification email.
@@ -127,7 +178,8 @@ Future<String?> signInWithGoogle(BuildContext context) async {
       final firestoreUser = await _firestoreService.getUser(user.uid);
 
       if (firestoreUser == null) {
-        // New user: save to Firestore
+        // New user: fetch city from device location before saving to Firestore
+        final city = await _getCityFromLocation();
         final newUser = UserModel(
           uid: user.uid,
           email: user.email ?? '',
@@ -135,6 +187,7 @@ Future<String?> signInWithGoogle(BuildContext context) async {
           lastName: user.displayName?.split(' ').sublist(1).join(' ') ?? '',
           profilePicture: user.photoURL ?? '',
           createdAt: Timestamp.now(),
+          assignedArea: city,
         );
 
         await _firestoreService.createUser(newUser);
