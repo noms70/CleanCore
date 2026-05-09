@@ -1,6 +1,9 @@
-import 'package:cc/services/theme_notifier.dart';
+import 'package:cc/services/auth_service.dart';
+import 'package:cc/utils/colors.dart';
+import 'package:cc/utils/theme_service.dart';
+import 'package:cc/views/auth/auth_landing_screen.dart';
+import 'package:cc/widgets/appbar.dart';
 import 'package:flutter/material.dart';
-import '../utils/colors.dart';
 import '../widgets/navbar.dart';
 import 'profile_page.dart';
 
@@ -14,130 +17,153 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool _notifications = true;
-  bool _locationTracking = true;
+  final AuthService _authService = AuthService();
+  bool isNotificationsEnabled = true;
+  bool isLocationTrackingEnabled = true;
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF0F1117) : const Color(0xFFF0F4F8);
-    final cardColor = isDark ? const Color(0xFF1E2430) : Colors.white;
-    final titleColor = isDark ? Colors.white : AppCol.btnbacke;
-    final subtitleColor = isDark ? Colors.white54 : Colors.grey[500]!;
-    final shadowColor = isDark ? Colors.black54 : Colors.black.withOpacity(0.05);
+    final isDark   = Theme.of(context).brightness == Brightness.dark;
+    final screenSz = MediaQuery.of(context).size;
+
+    // Header strip is always dark navy — consistent in both modes
+    const headerColor  = AppCol.primaryDark;
+    final surfaceColor = isDark ? AppCol.card : Colors.white;
 
     return Scaffold(
-      backgroundColor: bgColor,
-      appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF1A1F2E) : Colors.white,
-        elevation: 0.5,
-        automaticallyImplyLeading: false,
-        title: Text(
-          'Settings',
-          style: TextStyle(
-            color: titleColor,
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
-          ),
-        ),
-        centerTitle: true,
+      appBar: AppBuild().buildAppBar(
+        title: 'Settings',
+        icon: Icons.settings_rounded,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 28, 20, 40),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Account ────────────────────────────────────────────────
-            _sectionLabel('ACCOUNT'),
-            const SizedBox(height: 12),
-            _buildNavCard(
-              icon: Icons.person_rounded,
-              label: 'Personal Profile',
-              subtitle: 'View and edit your profile',
-              cardColor: cardColor,
-              titleColor: titleColor,
-              subtitleColor: subtitleColor,
-              shadowColor: shadowColor,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ProfilePage()),
+      body: SafeArea(
+        child: Container(
+          decoration: BoxDecoration(color: headerColor),
+          child: Column(
+            children: [
+              Expanded(
+                child: Container(
+                  width: screenSz.width,
+                  decoration: BoxDecoration(
+                    color: surfaceColor,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(32),
+                    ),
+                    boxShadow: isDark
+                        ? [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.3),
+                              blurRadius: 12,
+                              offset: const Offset(-4, 0),
+                            )
+                          ]
+                        : null,
+                  ),
+                  child: ListView(
+                    padding: EdgeInsets.only(
+                      top: screenSz.width * 0.05,
+                      left: screenSz.width * 0.06,
+                      right: screenSz.width * 0.06,
+                      bottom: screenSz.width * 0.18,
+                    ),
+                    children: [
+                      // ── Account ─────────────────────────────────────────
+                      _buildSectionHeader(context, "Account"),
+                      _buildListTile(
+                        context: context,
+                        icon: Icons.person_rounded,
+                        title: "Personal Profile",
+                        subtitle: "View and edit your profile",
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ProfilePage()),
+                        ),
+                      ),
+                      _buildDivider(context),
+
+                      // ── Preferences ──────────────────────────────────────
+                      _buildSectionHeader(context, "Preferences"),
+                      _buildSwitchTile(
+                        context: context,
+                        icon: Icons.notifications_rounded,
+                        title: "Route Notifications",
+                        value: isNotificationsEnabled,
+                        onChanged: (v) =>
+                            setState(() => isNotificationsEnabled = v),
+                      ),
+                      _buildSwitchTile(
+                        context: context,
+                        icon: Icons.location_on_rounded,
+                        title: "Location Tracking",
+                        value: isLocationTrackingEnabled,
+                        onChanged: (v) =>
+                            setState(() => isLocationTrackingEnabled = v),
+                      ),
+                      _buildDivider(context),
+
+                      // ── Appearance ───────────────────────────────────────
+                      _buildSectionHeader(context, "Appearance"),
+                      ValueListenableBuilder<ThemeMode>(
+                        valueListenable: themeNotifier,
+                        builder: (_, mode, __) => _buildSwitchTile(
+                          context: context,
+                          icon: mode == ThemeMode.dark
+                              ? Icons.dark_mode_rounded
+                              : Icons.light_mode_rounded,
+                          title: "Dark Mode",
+                          subtitle: mode == ThemeMode.dark
+                              ? "Switch to light theme"
+                              : "Switch to dark theme",
+                          value: mode == ThemeMode.dark,
+                          onChanged: (_) => toggleTheme(),
+                          activeColor: AppCol.primary,
+                        ),
+                      ),
+                      _buildDivider(context),
+
+                      // ── About ─────────────────────────────────────────────
+                      _buildSectionHeader(context, "About"),
+                      _buildListTile(
+                        context: context,
+                        icon: Icons.info_rounded,
+                        title: "App Version",
+                        subtitle: "1.0.0",
+                        onTap: () {},
+                      ),
+                      _buildListTile(
+                        context: context,
+                        icon: Icons.help_rounded,
+                        title: "Help & Support",
+                        subtitle: "Get assistance",
+                        onTap: () {},
+                      ),
+                      _buildDivider(context),
+
+                      // ── Sign Out ──────────────────────────────────────────
+                      _buildListTile(
+                        context: context,
+                        icon: Icons.logout_rounded,
+                        title: "Sign Out",
+                        subtitle: "Sign out of your account",
+                        iconColor: Colors.redAccent,
+                        titleColor: Colors.redAccent,
+                        onTap: () async {
+                          final navigator = Navigator.of(context);
+                          await _authService.signOut();
+                          if (!mounted) return;
+                          navigator.pushAndRemoveUntil(
+                            MaterialPageRoute(
+                                builder: (_) => AuthLandingScreen()),
+                            (Route<dynamic> route) => false,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── Appearance ─────────────────────────────────────────────
-            _sectionLabel('APPEARANCE'),
-            const SizedBox(height: 12),
-
-            // Dark mode toggle — wired to ThemeNotifier
-            ValueListenableBuilder<ThemeMode>(
-              valueListenable: ThemeNotifier.instance,
-              builder: (_, __, ___) => _buildToggleCard(
-                icon: ThemeNotifier.instance.isDark
-                    ? Icons.dark_mode_rounded
-                    : Icons.light_mode_rounded,
-                label: 'Dark Mode',
-                value: ThemeNotifier.instance.isDark,
-                cardColor: cardColor,
-                titleColor: titleColor,
-                shadowColor: shadowColor,
-                onChanged: (_) => ThemeNotifier.instance.toggle(),
-              ),
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── Preferences ────────────────────────────────────────────
-            _sectionLabel('PREFERENCES'),
-            const SizedBox(height: 12),
-            _buildToggleCard(
-              icon: Icons.notifications_rounded,
-              label: 'Route Notifications',
-              value: _notifications,
-              cardColor: cardColor,
-              titleColor: titleColor,
-              shadowColor: shadowColor,
-              onChanged: (v) => setState(() => _notifications = v),
-            ),
-            const SizedBox(height: 12),
-            _buildToggleCard(
-              icon: Icons.my_location_rounded,
-              label: 'Location Tracking',
-              value: _locationTracking,
-              cardColor: cardColor,
-              titleColor: titleColor,
-              shadowColor: shadowColor,
-              onChanged: (v) => setState(() => _locationTracking = v),
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── About ──────────────────────────────────────────────────
-            _sectionLabel('ABOUT'),
-            const SizedBox(height: 12),
-            _buildNavCard(
-              icon: Icons.info_rounded,
-              label: 'App Version',
-              subtitle: '1.0.0',
-              cardColor: cardColor,
-              titleColor: titleColor,
-              subtitleColor: subtitleColor,
-              shadowColor: shadowColor,
-              onTap: () {},
-            ),
-            const SizedBox(height: 12),
-            _buildNavCard(
-              icon: Icons.help_rounded,
-              label: 'Help & Support',
-              subtitle: 'Get assistance',
-              cardColor: cardColor,
-              titleColor: titleColor,
-              subtitleColor: subtitleColor,
-              shadowColor: shadowColor,
-              onTap: () {},
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: NavBar(
@@ -147,100 +173,122 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ─── Widgets ─────────────────────────────────────────────────────────────
-
-  Widget _sectionLabel(String label) {
-    return Text(
-      label,
-      style: const TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.bold,
-        letterSpacing: 1.4,
-        color: AppCol.btnbacks,
-      ),
+  Widget _buildDivider(BuildContext context) {
+    return Divider(
+      color: Theme.of(context).dividerColor,
+      thickness: 1,
+      height: 8,
     );
   }
 
-  Widget _buildNavCard({
-    required IconData icon,
-    required String label,
-    required String subtitle,
-    required Color cardColor,
-    required Color titleColor,
-    required Color subtitleColor,
-    required Color shadowColor,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(color: shadowColor, blurRadius: 8, offset: const Offset(0, 2))
-        ],
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: AppCol.btnbacks.withOpacity(0.12),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: AppCol.btnbacks, size: 20),
+  Widget _buildSectionHeader(BuildContext context, String title) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 20, bottom: 10),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: AppCol.primary,
+          letterSpacing: 1.0,
         ),
-        title: Text(label,
-            style: TextStyle(
-                fontSize: 15, fontWeight: FontWeight.w600, color: titleColor)),
-        subtitle: Text(subtitle,
-            style: TextStyle(fontSize: 12, color: subtitleColor)),
-        trailing:
-            Icon(Icons.chevron_right_rounded, color: AppCol.btnbacks.withOpacity(0.5)),
-        onTap: onTap,
       ),
     );
   }
 
-  Widget _buildToggleCard({
+  Widget _buildListTile({
+    required BuildContext context,
     required IconData icon,
-    required String label,
+    required String title,
+    required Function() onTap,
+    String subtitle = '',
+    Color? iconColor,
+    Color? titleColor,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final resolvedIcon  = iconColor  ?? scheme.onSurface;
+    final resolvedTitle = titleColor ?? scheme.onSurface;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: resolvedIcon.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: resolvedIcon, size: 22),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: resolvedTitle,
+        ),
+      ),
+      subtitle: subtitle.isNotEmpty
+          ? Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 13,
+                color: scheme.onSurface.withValues(alpha: 0.5),
+              ),
+            )
+          : null,
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        color: scheme.onSurface.withValues(alpha: 0.35),
+        size: 20,
+      ),
+      onTap: onTap,
+    );
+  }
+
+  Widget _buildSwitchTile({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
     required bool value,
-    required Color cardColor,
-    required Color titleColor,
-    required Color shadowColor,
-    required ValueChanged<bool> onChanged,
+    required Function(bool) onChanged,
+    String subtitle = '',
+    Color? activeColor,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(color: shadowColor, blurRadius: 8, offset: const Offset(0, 2))
-        ],
+    final scheme = Theme.of(context).colorScheme;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: AppCol.primary.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, color: AppCol.primary, size: 22),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: AppCol.btnbacks.withOpacity(0.12),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: AppCol.btnbacks, size: 20),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: scheme.onSurface,
         ),
-        title: Text(label,
-            style: TextStyle(
-                fontSize: 15, fontWeight: FontWeight.w600, color: titleColor)),
-        trailing: Switch(
-          value: value,
-          onChanged: onChanged,
-          activeColor: AppCol.btnbacks,
-          activeTrackColor: AppCol.btnbacks.withOpacity(0.3),
-          inactiveThumbColor: Colors.grey.shade400,
-          inactiveTrackColor: Colors.grey.shade200,
-        ),
+      ),
+      subtitle: subtitle.isNotEmpty
+          ? Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 13,
+                color: scheme.onSurface.withValues(alpha: 0.5),
+              ),
+            )
+          : null,
+      trailing: Switch(
+        value: value,
+        onChanged: onChanged,
+        activeThumbColor: activeColor ?? AppCol.primary,
       ),
     );
   }

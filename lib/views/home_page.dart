@@ -1,17 +1,231 @@
-import 'package:cc/services/auth_service.dart';
-import 'package:cc/services/firestore_service.dart';
-import 'package:cc/widgets/kpi_card.dart';
-import 'package:flutter/material.dart';
-import 'package:cc/utils/colors.dart';
-import '../widgets/navbar.dart';
-import './settings_page.dart';
-import '../widgets/alert_card.dart';
-import './map_page.dart'; // <-- IMPORT NEW MAP PAGE
-import '../models/models.dart'; // <-- IMPORT NEW MODELS
-import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
+
 
 import 'package:cc/models/user_model.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:cc/services/auth_service.dart';
+import 'package:cc/services/firestore_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:cc/utils/colors.dart';
+import '../models/models.dart';
+import '../widgets/navbar.dart';
+import './map_page.dart';
+import './settings_page.dart';
+import '../widgets/inactivity_wrapper.dart';
+
+// =========================================================================
+// 1. **FIXED ERROR:** ProgressPainter must be a top-level class.
+// =========================================================================
+
+/// Custom Painter for the Circular Progress Bar for route completion.
+class ProgressPainter extends CustomPainter {
+  final double progress;
+  final Color baseColor;
+  final Color progressColor;
+  final double strokeWidth;
+
+  ProgressPainter({
+    required this.progress,
+    required this.baseColor,
+    required this.progressColor,
+    required this.strokeWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = min(size.width / 2, size.height / 2) - strokeWidth / 2;
+
+    // Base circle (unfilled part)
+    final basePaint = Paint()
+      ..color = baseColor
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+
+    canvas.drawCircle(center, radius, basePaint);
+
+    // Progress arc (filled part)
+    final progressPaint = Paint()
+      ..color = progressColor
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+
+    double sweepAngle = 2 * pi * progress;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -pi / 2, // Start from the top
+      sweepAngle,
+      false,
+      progressPaint,
+    );
+  }
+
+  @override
+  // Corrected the covariant type and condition check.
+  bool shouldRepaint(covariant ProgressPainter oldDelegate) {
+    return oldDelegate.progress != progress;
+  }
+}
+
+// =========================================================================
+// 2. Animated Metric Card
+// =========================================================================
+
+class _AnimatedMetricCard extends StatefulWidget {
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color accentColor;
+  final List<Color> gradient;
+  final bool isDark;
+
+  const _AnimatedMetricCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.accentColor,
+    required this.gradient,
+    required this.isDark,
+  });
+
+  @override
+  State<_AnimatedMetricCard> createState() => _AnimatedMetricCardState();
+}
+
+class _AnimatedMetricCardState extends State<_AnimatedMetricCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _pressCtrl;
+  late Animation<double> _scaleAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _pressCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+      lowerBound: 0.0,
+      upperBound: 1.0,
+    );
+    _scaleAnim = Tween<double>(begin: 1.0, end: 0.94).animate(
+      CurvedAnimation(parent: _pressCtrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pressCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => _pressCtrl.forward(),
+      onTapUp: (_) => _pressCtrl.reverse(),
+      onTapCancel: () => _pressCtrl.reverse(),
+      child: AnimatedBuilder(
+        animation: _scaleAnim,
+        builder: (_, child) =>
+            Transform.scale(scale: _scaleAnim.value, child: child),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              colors: widget.isDark
+                  ? [
+                      widget.gradient[0].withValues(alpha: 0.20),
+                      widget.gradient[1].withValues(alpha: 0.10),
+                    ]
+                  : [
+                      widget.gradient[0].withValues(alpha: 0.12),
+                      widget.gradient[1].withValues(alpha: 0.06),
+                    ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            border: Border.all(
+              color: widget.accentColor.withValues(alpha: widget.isDark ? 0.30 : 0.20),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: widget.accentColor.withValues(alpha: widget.isDark ? 0.18 : 0.10),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Icon + title row
+              Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: widget.gradient,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(9),
+                      boxShadow: [
+                        BoxShadow(
+                          color: widget.accentColor.withValues(alpha: 0.4),
+                          blurRadius: 6,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Icon(widget.icon, color: Colors.white, size: 17),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: widget.accentColor,
+                        letterSpacing: 0.3,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              // Value
+              Text(
+                widget.value,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: Theme.of(context).colorScheme.onSurface,
+                  letterSpacing: -0.5,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =========================================================================
+// 3. HomePage Implementation
+// =========================================================================
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,101 +237,30 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
   UserModel? _user;
 
   // Driver information
-  String driverName = 'Ayesha Noman';
-  String currentStatus = 'Offline'; // Offline, On Route, Break
+  String currentStatus = 'Offline';
 
-  // Route data
-  int completedBins = 12;
-  int totalBins = 45;
-  String routeId = 'Route 4B - Downtown';
-  String estimatedTime = '2h 35m';
-  int criticalBinsNearby = 3;
+  // Route data — populated from Firestore 'routes' collection
+  int completedBins = 0;
+  int totalBins = 0;
+  String routeId = '—';
+  String estimatedTime = '—';
+  int criticalBinsNearby = 0;
+  double estimatedFuel = 0.0;
 
-  // Performance metrics
-  double efficiencyScore = 87.5;
-  double distanceSaved = 24.3; // km
-  double capacityUsage = 68; // percentage
+  // Firestore subscriptions
+  StreamSubscription<QuerySnapshot>? _routeSub;
+  StreamSubscription<QuerySnapshot>? _binsSub;
 
-  // --- MODIFICATION: NEW ISLAMABAD LOCATIONS ---
-  // Map markers and locations
-  // THIS DATA IS STILL THE "SOURCE OF TRUTH"
-  final List<BinLocation> binLocations = [
-    BinLocation(
-      id: 'BIN_ISB_001',
-      lat: 33.72962, // Faisal Mosque
-      lng: 73.03702,
-      fullness: 92,
-      isCritical: true,
-      area: 'Faisal Mosque Area',
-      status: 'Critical',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_ISB_002',
-      lat: 33.69333, // Pakistan Monument
-      lng: 73.06822,
-      fullness: 45,
-      isCritical: false,
-      area: 'Pakistan Monument',
-      status: 'Normal',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_ISB_003',
-      lat: 33.7400, // Daman-e-Koh
-      lng: 73.0600,
-      fullness: 98,
-      isCritical: true,
-      area: 'Daman-e-Koh Viewpoint',
-      status: 'Critical',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_ISB_004',
-      lat: 33.7077, // Centaurus Mall
-      lng: 73.0499,
-      fullness: 35,
-      isCritical: false,
-      area: 'Centaurus Mall',
-      status: 'Normal',
-      capacity: 240,
-    ),
-    BinLocation(
-      id: 'BIN_ISB_005',
-      lat: 33.70293, // Rawal Lake
-      lng: 73.12771,
-      fullness: 88,
-      isCritical: true,
-      area: 'Rawal Lake Park',
-      status: 'Critical',
-      capacity: 240,
-    ),
-  ];
+  // Bins are loaded live from Firestore inside MapPage — no hardcoded data here.
+  final List<BinLocation> binLocations = [];
 
-  // Map-related state is MOVED to MapPage
-  // --- MODIFICATION: NEW DRIVER STARTING LOCATION ---
-  double driverLat = 33.7077; // Centered at Centaurus
-  double driverLng = 73.0499;
-  // --- END MODIFICATION ---
-
-  // Alerts
-  List<Alert> alerts = [
-    Alert(
-      title: 'New Bin Urgency Detected',
-      message: 'Route recalculated for better efficiency',
-      type: 'info',
-      icon: Icons.route,
-    ),
-    Alert(
-      title: 'Anomaly #123 Resolved',
-      message: 'Admin confirmed issue closure',
-      type: 'success',
-      icon: Icons.check_circle,
-    ),
-  ];
+  // Driver position — updated by live GPS stream in MapPage.
+  double driverLat = 33.6938; // G-9 Islamabad fallback
+  double driverLng = 73.0651;
 
   String currentPage = 'home';
 
@@ -131,6 +274,106 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _initializeUserData();
+    _subscribeToRouteData();
+    _subscribeToBinStats();
+  }
+
+  @override
+  void dispose() {
+    _routeSub?.cancel();
+    _binsSub?.cancel();
+    super.dispose();
+  }
+
+  /// Listen to the driver's active route in Firestore.
+  /// Field 'driverId' matches what the backend writes (not 'workerId').
+  void _subscribeToRouteData() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _routeSub = _db
+        .collection('routes')
+        .where('driverId', isEqualTo: uid)
+        .where('status', isEqualTo: 'active')
+        .limit(1)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      if (snap.docs.isEmpty) {
+        setState(() {
+          completedBins = 0;
+          totalBins = 0;
+          routeId = 'No active route';
+          estimatedFuel = 0.0;
+          currentStatus = 'Idle';
+        });
+        return;
+      }
+      final route = ActiveRoute.fromFirestore(snap.docs.first);
+      setState(() {
+        completedBins = route.completedStops;
+        totalBins = route.totalStops;
+        routeId = route.routeId.length > 12
+            ? '${route.routeId.substring(0, 12)}…'
+            : route.routeId;
+        estimatedFuel = route.estimatedFuel;
+        currentStatus = 'On Route';
+        // Rough ETA: assume 2 min per remaining stop
+        final remaining = route.totalStops - route.completedStops;
+        final mins = remaining * 2;
+        estimatedTime = mins >= 60
+            ? '${mins ~/ 60}h ${mins % 60}m'
+            : '${mins}m';
+      });
+    });
+  }
+
+  static const double _proximityRadiusM = 10000; // must match map_page
+
+  /// Count critical bins visible to this worker (area-scoped or proximity-based).
+  void _subscribeToBinStats() {
+    _binsSub = _db.collection('bins').snapshots().listen((snap) {
+      if (!mounted) return;
+      final workerArea  = _user?.assignedArea ?? '';
+      final workerWaste = (_user?.assignedWasteType ?? '').toLowerCase();
+      final userLat     = _user?.lat ?? 0.0;
+      final userLng     = _user?.lng ?? 0.0;
+
+      final critical = snap.docs.where((d) {
+        final data   = d.data();
+        final fill   = (data['fillLevel'] ?? data['fill_level'] ?? 0) as num;
+        final status = (data['status'] ?? '').toString().toLowerCase();
+
+        if (workerArea.isNotEmpty) {
+          final binArea = (data['area'] ?? data['sector'] ?? '').toString();
+          if (binArea != workerArea) return false;
+        } else if (userLat != 0.0 && userLng != 0.0) {
+          // No area assigned — fall back to proximity using stored coordinates.
+          final binLat = (data['lat'] as num?)?.toDouble()
+              ?? (data['location'] is GeoPoint
+                  ? (data['location'] as GeoPoint).latitude
+                  : null);
+          final binLng = (data['lng'] as num?)?.toDouble()
+              ?? (data['location'] is GeoPoint
+                  ? (data['location'] as GeoPoint).longitude
+                  : null);
+          if (binLat != null && binLng != null) {
+            final distM = Geolocator.distanceBetween(
+                userLat, userLng, binLat, binLng);
+            if (distM > _proximityRadiusM) return false;
+          }
+        }
+
+        if (workerWaste.isNotEmpty) {
+          final binWaste =
+              (data['wasteType'] ?? data['type'] ?? '').toString().toLowerCase();
+          if (binWaste != workerWaste) return false;
+        }
+
+        return fill >= 90 || status == 'critical' || status == 'full';
+      }).length;
+      setState(() => criticalBinsNearby = critical);
+    });
   }
 
   void _initializeUserData() async {
@@ -151,16 +394,16 @@ class _HomePageState extends State<HomePage> {
     final hour = DateTime.now().hour;
     if (hour < 12) {
       _greeting = 'Good Morning';
-      _sunIcon = Icons.wb_sunny;
-      _gradientColors = [const Color(0xFFFDB750), const Color(0xFFF77F00)];
+      _sunIcon = Icons.wb_sunny_rounded;
+      _gradientColors = [AppCol.success, AppCol.primary]; // fresh teal-green
     } else if (hour < 17) {
       _greeting = 'Good Afternoon';
-      _sunIcon = Icons.wb_sunny;
-      _gradientColors = [const Color(0xFF00D9D9), const Color(0xFF0A8E8B)];
+      _sunIcon = Icons.wb_sunny_rounded;
+      _gradientColors = [AppCol.primary, AppCol.card];    // teal → card navy
     } else {
       _greeting = 'Good Evening';
-      _sunIcon = Icons.nights_stay;
-      _gradientColors = [const Color(0xFF2D3E50), const Color(0xFF1A1F36)];
+      _sunIcon = Icons.nights_stay_rounded;
+      _gradientColors = [AppCol.card, AppCol.primaryDark]; // deep navy evening
     }
   }
 
@@ -174,8 +417,7 @@ class _HomePageState extends State<HomePage> {
       return _buildUserInfoSkeleton(screenSize);
     }
 
-    final firstName = _capitalize(_user!.firstName);
-    final lastName = _capitalize(_user!.lastName);
+    final firstName  = _capitalize(_user!.firstName);
     final profilePic = _user!.profilePicture;
 
     ImageProvider? backgroundImage;
@@ -184,8 +426,11 @@ class _HomePageState extends State<HomePage> {
         backgroundImage = NetworkImage(profilePic);
       } else {
         try {
+          // It's generally better to use a logger, but keeping print for now to match style
+          // ignore: avoid_print
           backgroundImage = MemoryImage(base64Url.decode(profilePic));
         } catch (e) {
+          // ignore: avoid_print
           print("Error decoding base64 image: $e");
           backgroundImage = null;
         }
@@ -203,7 +448,7 @@ class _HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.circular(screenSize.width * 0.04),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
+            color: Colors.black.withValues(alpha: 0.3),
             blurRadius: 10,
             offset: const Offset(0, 6),
           ),
@@ -250,7 +495,8 @@ class _HomePageState extends State<HomePage> {
                 ),
                 SizedBox(height: screenSize.width * 0.01),
                 Text(
-                  '$firstName $lastName',
+                  // Use the user's name
+                  '${_user!.firstName} ${_user!.lastName}',
                   style: TextStyle(
                     fontSize: screenSize.width * 0.05,
                     fontWeight: FontWeight.bold,
@@ -259,7 +505,7 @@ class _HomePageState extends State<HomePage> {
                 ),
                 SizedBox(height: screenSize.width * 0.01),
                 Text(
-                  'Welcome back! Ready for a Ride?',
+                  'Welcome back! Ready for a Drive?',
                   style: TextStyle(
                     fontSize: screenSize.width * 0.04,
                     color: Colors.white70,
@@ -274,11 +520,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildUserInfoSkeleton(Size screenSize) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final shimBase = isDark ? AppCol.secondary : Colors.grey.withValues(alpha: 0.2);
+    final shimShine = isDark ? AppCol.card : Colors.grey.withValues(alpha: 0.1);
+
     return Container(
       margin: EdgeInsets.all(screenSize.width * 0.04),
       padding: EdgeInsets.all(screenSize.width * 0.04),
       decoration: BoxDecoration(
-        color: Colors.grey.withOpacity(0.2),
+        color: shimBase,
         borderRadius: BorderRadius.circular(screenSize.width * 0.04),
       ),
       child: Row(
@@ -288,7 +538,7 @@ class _HomePageState extends State<HomePage> {
             height: screenSize.width * 0.16,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.grey.withOpacity(0.3),
+              color: shimShine,
             ),
           ),
           SizedBox(width: screenSize.width * 0.04),
@@ -298,38 +548,16 @@ class _HomePageState extends State<HomePage> {
               children: [
                 Container(
                   height: 12,
-                  color: Colors.grey.withOpacity(0.3),
+                  color: shimShine,
                   margin: EdgeInsets.only(bottom: screenSize.width * 0.02),
                 ),
-                Container(height: 12, color: Colors.grey.withOpacity(0.3)),
+                Container(height: 12, color: shimShine),
               ],
             ),
           ),
         ],
       ),
     );
-  }
-
-  String getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) {
-      return 'Good Morning';
-    } else if (hour < 17) {
-      return 'Good Afternoon';
-    } else {
-      return 'Good Evening';
-    }
-  }
-
-  Color getStatusColor() {
-    switch (currentStatus) {
-      case 'On Route':
-        return Colors.green;
-      case 'Break':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
   }
 
   @override
@@ -337,206 +565,133 @@ class _HomePageState extends State<HomePage> {
     // --- THIS IS NOW THE MAIN PAGE ROUTER ---
 
     if (currentPage == 'settings') {
-      return SettingsPage(
-        onNavigate: (page) {
-          setState(() {
-            currentPage = page;
-          });
-        },
+      return InactivityWrapper(
+        child: SettingsPage(
+          onNavigate: (page) {
+            setState(() {
+              currentPage = page;
+            });
+          },
+        ),
       );
     }
 
     if (currentPage == 'Map') {
-      return MapPage(
-        binLocations: binLocations,
-        driverLat: driverLat,
-        driverLng: driverLng,
-        currentPage: currentPage,
-        onNavigate: (page) {
-          setState(() {
-            currentPage = page;
-          });
-        },
+      return InactivityWrapper(
+        child: MapPage(
+          binLocations: binLocations,
+          driverLat: driverLat,
+          driverLng: driverLng,
+          currentPage: currentPage,
+          onNavigate: (page) {
+            setState(() {
+              currentPage = page;
+            });
+          },
+        ),
       );
     }
 
     // --- ELSE, SHOW THE HOME PAGE ---
     final screenSize = MediaQuery.of(context).size;
 
-    return Scaffold(
-      extendBody: true,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(40)),
-        ),
-        backgroundColor: AppCol.btnbacks,
-        elevation: 0,
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(left: 50, bottom: 10),
-                child: Center(
-                  child: Image.asset(
-                    'assets/cc_logo.png',
-                    height: 100,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
+    return InactivityWrapper(
+      child: Scaffold(
+        extendBody: true,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(40)),
+          ),
+          backgroundColor: AppCol.primaryDark,
+          elevation: 0,
+          toolbarHeight: 80,
+          title: Center(
+            child: Image.asset(
+              'assets/app_logo_2.png',
+              height: 72,
+              fit: BoxFit.contain,
             ),
-            const SizedBox(width: 48), // Spacer to balance the layout
-          ],
+          ),
         ),
-      ),
-      body: _buildHomePageContent(
-        screenSize,
-      ), // <-- USE NEW HOME CONTENT METHOD
-      bottomNavigationBar: NavBar(
-        currentPage: currentPage,
-        onNavigate: (page) {
-          setState(() {
-            currentPage = page;
-          });
-        },
+        body: _buildHomePageContent(
+          screenSize,
+        ), // <-- USE NEW HOME CONTENT METHOD
+        bottomNavigationBar: NavBar(
+          currentPage: currentPage,
+          onNavigate: (page) {
+            setState(() {
+              currentPage = page;
+            });
+          },
+        ),
       ),
     );
   }
 
-  // --- NEW METHOD TO BUILD JUST THE HOME PAGE'S CONTENT ---
+  // --- MODIFIED METHOD TO BUILD JUST THE HOME PAGE'S CONTENT ---
   Widget _buildHomePageContent(Size screenSize) {
-    return Stack(
-      children: [
-        Column(
-          children: [
-            _buildUserInfo(context, screenSize),
-            // GoogleMap WIDGET REMOVED
-            // _buildBinTile ListView REMOVED
-            Expanded(
-              flex: 1,
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    _buildRouteSummary(),
-                    const SizedBox(height: 16),
-                    //_buildKPIs(), // <-- UNCOMMENTED
-                    const SizedBox(height: 20),
-                    _buildAlerts(), // <-- MOVED HERE FOR LAYOUT
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          _buildUserInfo(context, screenSize),
+          const SizedBox(height: 20),
+          _buildCircularProgressSection(screenSize), // NEW SECTION
+          const SizedBox(height: 30),
+          _buildKeyRouteMetricsGrid(screenSize), // NEW SECTION
+          const SizedBox(height: 100), // Extra space for NavBar clearance
+        ],
+      ),
     );
   }
 
-  Widget _buildRouteSummary() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? const Color(0xFF1E2430) : Colors.white;
-    final textColor = isDark ? Colors.white : AppCol.btntext;
-    final subTextColor = isDark ? Colors.white70 : AppCol.textGrey;
+  // --- NEW: Circular Progress Bar for Route Completion ---
+  Widget _buildCircularProgressSection(Size screenSize) {
+    final progress           = totalBins == 0 ? 0.0 : completedBins / totalBins;
+    final progressPercentage = (progress * 100).toStringAsFixed(0);
+    final scheme             = Theme.of(context).colorScheme;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppCol.btnbacks.withOpacity(0.2), width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: isDark ? Colors.black54 : Colors.black.withOpacity(0.05),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Center(
+      child: SizedBox(
+        width: screenSize.width * 0.5,
+        height: screenSize.width * 0.5,
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            Row(
-              children: [
-                const Icon(Icons.map, color: AppCol.btnbacks, size: 24),
-                const SizedBox(width: 12),
-                Text(
-                  'Today\'s Route',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: textColor,
-                  ),
-                ),
-              ],
+            CustomPaint(
+              size: Size(screenSize.width * 0.5, screenSize.width * 0.5),
+              painter: ProgressPainter(
+                progress: progress,
+                baseColor: AppCol.primary.withValues(alpha: 0.15),
+                progressColor: AppCol.primary,
+                strokeWidth: 12.0,
+              ),
             ),
-            const SizedBox(height: 16),
-            _buildRouteSummaryRow('Route ID', routeId),
-            const SizedBox(height: 12),
-            _buildRouteSummaryRow('Total Bins', '$totalBins Bins'),
-            const SizedBox(height: 12),
             Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Progress',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: textColor,
-                      ),
-                    ),
-                    Text(
-                      '$completedBins / $totalBins Collected',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: subTextColor,
-                      ),
-                    ),
-                  ],
+                Icon(
+                  Icons.delete_sweep_rounded,
+                  size: screenSize.width * 0.1,
+                  color: AppCol.primary,
                 ),
                 const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: completedBins / totalBins,
-                    minHeight: 8,
-                    backgroundColor: AppCol.btnbacks.withOpacity(0.2),
-                    valueColor: AlwaysStoppedAnimation<Color>(AppCol.btnbacks),
+                Text(
+                  '$progressPercentage%',
+                  style: TextStyle(
+                    fontSize: screenSize.width * 0.1,
+                    fontWeight: FontWeight.bold,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                Text(
+                  'Route Progress',
+                  style: TextStyle(
+                    fontSize: screenSize.width * 0.04,
+                    color: scheme.onSurface.withValues(alpha: 0.5),
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            _buildRouteSummaryRow('Est. Completion', estimatedTime),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.withOpacity(0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.warning_amber, color: Colors.red, size: 20),
-                  const SizedBox(width: 10),
-                  Text(
-                    '$criticalBinsNearby Critical Bins Nearby (95%+ Full)',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.red,
-                    ),
-                  ),
-                ],
-              ),
             ),
           ],
         ),
@@ -544,80 +699,99 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildRouteSummaryRow(String label, String value) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : AppCol.btntext;
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: textColor,
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: AppCol.ngt,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAlerts() {
-    if (alerts.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : AppCol.btntext;
+  // --- Route Metrics Grid ---
+  Widget _buildKeyRouteMetricsGrid(Size screenSize) {
+    final scheme = Theme.of(context).colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.notifications_active, color: AppCol.btnbacks),
-              const SizedBox(width: 8),
-              Text(
-                'Alerts & Notifications',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: textColor,
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppCol.btnbacks.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${alerts.length}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: AppCol.btnbacks,
+          Padding(
+            padding: const EdgeInsets.only(left: 2, bottom: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: AppCol.primary,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
+                const SizedBox(width: 10),
+                Text(
+                  'Route Overview',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          GridView.count(
+            physics: const NeverScrollableScrollPhysics(),
+            shrinkWrap: true,
+            crossAxisCount: 2,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 1.55,
+            children: [
+              _buildMetricCard(
+                title: 'Route ID',
+                value: routeId,
+                icon: Icons.alt_route_rounded,
+                accentColor: AppCol.primary,
+                gradient: const [Color(0xFF0BBFC9), Color(0xFF048A7E)],
+              ),
+              _buildMetricCard(
+                title: 'Est. Time',
+                value: estimatedTime,
+                icon: Icons.schedule_rounded,
+                accentColor: const Color(0xFF7C6FED),
+                gradient: const [Color(0xFF7C6FED), Color(0xFF4F46B8)],
+              ),
+              _buildMetricCard(
+                title: 'Critical Bins',
+                value: '$criticalBinsNearby',
+                icon: Icons.crisis_alert_rounded,
+                accentColor: const Color(0xFFE05C6A),
+                gradient: const [Color(0xFFE05C6A), Color(0xFFA8293A)],
+              ),
+              _buildMetricCard(
+                title: 'Fuel Est.',
+                value: '${estimatedFuel.toStringAsFixed(1)} L',
+                icon: Icons.local_gas_station_rounded,
+                accentColor: AppCol.success,
+                gradient: const [Color(0xFF1DD1A1), Color(0xFF0E9B77)],
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          ...alerts.map((alert) => AlertCard(alert: alert)),
         ],
       ),
+    );
+  }
+
+  Widget _buildMetricCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color accentColor,
+    required List<Color> gradient,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return _AnimatedMetricCard(
+      title: title,
+      value: value,
+      icon: icon,
+      accentColor: accentColor,
+      gradient: gradient,
+      isDark: isDark,
     );
   }
 }

@@ -1,25 +1,35 @@
+import 'package:cc/utils/colors.dart';
 import 'package:flutter/material.dart';
-import '../utils/colors.dart';
 
 class NavBar extends StatelessWidget {
   final String currentPage;
   final Function(String) onNavigate;
 
   const NavBar({Key? key, required this.currentPage, required this.onNavigate})
-    : super(key: key);
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     final double screenWidth = MediaQuery.of(context).size.width;
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
     const double maxNavBarWidth = 500.0;
-    const double mobileHorizontalPadding = 15.0;
+    const double mobileHorizontalPadding = 16.0;
 
     double horizontalPadding;
-    if (screenWidth > (maxNavBarWidth + (mobileHorizontalPadding * 2))) {
+    if (screenWidth > (maxNavBarWidth + mobileHorizontalPadding * 2)) {
       horizontalPadding = (screenWidth - maxNavBarWidth) / 2;
     } else {
       horizontalPadding = mobileHorizontalPadding;
     }
+
+    // Dark: card navy with teal accent. Light: white with teal accent.
+    final Color navBg      = isDark ? AppCol.card : Colors.white;
+    final Color selectedFg = AppCol.primary;
+    final Color unselectedFg =
+        isDark ? AppCol.mutedFg : Colors.grey.shade500;
+    final Color shadowColor =
+        isDark ? Colors.black54 : Colors.black.withValues(alpha: 0.12);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -28,24 +38,19 @@ class NavBar extends StatelessWidget {
         right: horizontalPadding,
       ),
       child: Container(
-        height: 70.0,
+        height: 68.0,
         decoration: BoxDecoration(
+          color: navBg,
           borderRadius: BorderRadius.circular(40.0),
-          gradient: LinearGradient(
-            colors: [AppCol.btnbacks, AppCol.btnbacks.withOpacity(0.9)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+          border: isDark
+              ? Border.all(color: AppCol.secondary, width: 1)
+              : Border.all(color: Colors.grey.shade200, width: 1),
           boxShadow: [
             BoxShadow(
-              color: AppCol.btnbacks.withOpacity(0.3),
+              color: shadowColor,
               blurRadius: 20,
-              offset: const Offset(0, 5),
-            ),
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
+              offset: const Offset(0, 6),
+              spreadRadius: 0,
             ),
           ],
         ),
@@ -57,16 +62,22 @@ class NavBar extends StatelessWidget {
                 icon: Icons.home_rounded,
                 label: 'Home',
                 pageName: 'home',
+                selectedFg: selectedFg,
+                unselectedFg: unselectedFg,
               ),
               _buildNavItem(
                 icon: Icons.map_rounded,
                 label: 'Map',
                 pageName: 'Map',
+                selectedFg: selectedFg,
+                unselectedFg: unselectedFg,
               ),
               _buildNavItem(
                 icon: Icons.settings_rounded,
                 label: 'Settings',
                 pageName: 'settings',
+                selectedFg: selectedFg,
+                unselectedFg: unselectedFg,
               ),
             ],
           ),
@@ -79,53 +90,49 @@ class NavBar extends StatelessWidget {
     required IconData icon,
     required String label,
     required String pageName,
+    required Color selectedFg,
+    required Color unselectedFg,
   }) {
     final bool isSelected = (currentPage == pageName);
-    final Color itemColor = isSelected
-        ? Colors.white
-        : Colors.white.withOpacity(0.5);
+    final Color itemColor = isSelected ? selectedFg : unselectedFg;
 
     return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => onNavigate(pageName),
-          splashColor: Colors.white.withOpacity(0.1),
-          highlightColor: Colors.white.withOpacity(0.05),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeInOut,
-            transform: Matrix4.identity()..scale(isSelected ? 1.0 : 0.95),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: EdgeInsets.all(isSelected ? 8 : 6),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Colors.white.withOpacity(0.15)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    icon,
-                    color: itemColor,
-                    size: isSelected ? 26 : 24,
-                  ),
+      child: InkWell(
+        onTap: () => onNavigate(pageName),
+        splashColor: AppCol.primary.withValues(alpha: 0.12),
+        highlightColor: AppCol.primary.withValues(alpha: 0.06),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: EdgeInsets.symmetric(
+                  horizontal: isSelected ? 14 : 0,
+                  vertical: 4,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: itemColor,
-                    fontSize: isSelected ? 13 : 12,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                    letterSpacing: 0.3,
-                  ),
+                decoration: isSelected
+                    ? BoxDecoration(
+                        color: AppCol.primary.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(20),
+                      )
+                    : null,
+                child: Icon(icon, color: itemColor, size: 22),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  color: itemColor,
+                  fontSize: 11,
+                  fontWeight:
+                      isSelected ? FontWeight.w700 : FontWeight.normal,
+                  letterSpacing: 0.2,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

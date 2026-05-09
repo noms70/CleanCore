@@ -1,5 +1,5 @@
-import 'package:cc/views/auth/auth_landing_screen.dart';
 import 'package:cc/utils/colors.dart';
+import 'package:cc/views/auth/auth_landing_screen.dart';
 import 'package:cc/views/home_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -13,87 +13,211 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
-  AnimationController? _fadeController;
-  Animation<double>? _fadeAnimation;
+  late AnimationController _fadeCtrl;
+  late AnimationController _slideCtrl;
+  late Animation<double>   _fadeAnim;
+  late Animation<Offset>   _slideAnim;
 
   @override
   void initState() {
     super.initState();
-    _initializeFadeAnimation();
-    _fadeController?.forward();
 
-    // Check auth state after splash and navigate accordingly
-    Future.delayed(const Duration(seconds: 3), _navigateBasedOnAuthState);
+    _fadeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _slideCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.18),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOutCubic));
+
+    // Stagger: slide starts 150ms after fade
+    _fadeCtrl.forward();
+    Future.delayed(const Duration(milliseconds: 150), _slideCtrl.forward);
+
+    Future.delayed(const Duration(seconds: 3), _navigate);
   }
 
-  /// Navigates to HomePage if already authenticated, otherwise to AuthLandingScreen.
-  void _navigateBasedOnAuthState() {
+  void _navigate() {
     if (!mounted) return;
-    final User? currentUser = FirebaseAuth.instance.currentUser;
-    final Widget destination = currentUser != null
-        ? const HomePage()
-        : const AuthLandingScreen();
-
+    final user = FirebaseAuth.instance.currentUser;
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => destination),
+      MaterialPageRoute(
+        builder: (_) =>
+            (user != null && user.emailVerified) ? const HomePage() : AuthLandingScreen(),
+      ),
     );
   }
 
   @override
   void dispose() {
-    _fadeController?.dispose();
+    _fadeCtrl.dispose();
+    _slideCtrl.dispose();
     super.dispose();
-  }
-
-  void _initializeFadeAnimation() {
-    _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    );
-    _fadeAnimation = Tween<double>(begin: 0.2, end: 1.0).animate(
-      CurvedAnimation(parent: _fadeController!, curve: Curves.easeInOut),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isPortrait = screenHeight > screenWidth;
+    final size = MediaQuery.of(context).size;
 
     return Scaffold(
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: BoxDecoration(gradient: AppCol.main),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [AppCol.primaryDark, AppCol.card, AppCol.primaryDark],
+            stops: [0.0, 0.5, 1.0],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Stack(
           children: [
-            if (_fadeAnimation != null)
-              FadeTransition(
-                opacity: _fadeAnimation!,
-                child: Image.asset(
-                  'assets/cc_logo.png',
-                  width: isPortrait ? screenWidth * 0.6 : screenWidth * 0.7,
-                  fit: BoxFit.contain,
+            // ── Decorative teal circle (top-right) ──────────────────────────
+            Positioned(
+              top: -size.width * 0.3,
+              right: -size.width * 0.2,
+              child: Container(
+                width: size.width * 0.7,
+                height: size.width * 0.7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppCol.primary.withValues(alpha: 0.08),
                 ),
               ),
-
-            const SizedBox(height: 10),
-
-            Text(
-              'A Smartends Solution',
-              style: TextStyle(
-                fontFamily: 'Montserrat',
-                fontSize: isPortrait
-                    ? screenHeight * 0.017
-                    : screenHeight * 0.03,
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+            ),
+            // ── Decorative teal circle (bottom-left) ─────────────────────────
+            Positioned(
+              bottom: -size.width * 0.25,
+              left: -size.width * 0.15,
+              child: Container(
+                width: size.width * 0.6,
+                height: size.width * 0.6,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppCol.primary.withValues(alpha: 0.06),
+                ),
               ),
-              textAlign: TextAlign.center,
+            ),
+
+            // ── Centre content ───────────────────────────────────────────────
+            Center(
+              child: FadeTransition(
+                opacity: _fadeAnim,
+                child: SlideTransition(
+                  position: _slideAnim,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Glowing teal backdrop behind the logo
+                      Container(
+                        padding: EdgeInsets.all(size.width * 0.07),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppCol.primary.withValues(alpha: 0.10),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppCol.primary.withValues(alpha: 0.25),
+                              blurRadius: 60,
+                              spreadRadius: 10,
+                            ),
+                          ],
+                        ),
+                        child: Image.asset(
+                          'assets/app_logo_2.png',
+                          width: size.width * 0.36,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+
+                      SizedBox(height: size.height * 0.04),
+
+                      // Brand name
+                      RichText(
+                        text: const TextSpan(
+                          children: [
+                            TextSpan(
+                              text: 'Clean',
+                              style: TextStyle(
+                                fontFamily: 'Montserrat',
+                                fontSize: 32,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                letterSpacing: 1.0,
+                              ),
+                            ),
+                            TextSpan(
+                              text: 'Core',
+                              style: TextStyle(
+                                fontFamily: 'Montserrat',
+                                fontSize: 32,
+                                fontWeight: FontWeight.w800,
+                                color: AppCol.primary,
+                                letterSpacing: 1.0,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      SizedBox(height: size.height * 0.012),
+
+                      // Tagline
+                      Text(
+                        'Smart Waste Collection',
+                        style: TextStyle(
+                          fontFamily: 'Montserrat',
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white.withValues(alpha: 0.5),
+                          letterSpacing: 2.0,
+                        ),
+                      ),
+
+                      SizedBox(height: size.height * 0.015),
+
+                      // Thin teal divider line
+                      Container(
+                        width: size.width * 0.12,
+                        height: 2,
+                        decoration: BoxDecoration(
+                          color: AppCol.primary,
+                          borderRadius: BorderRadius.circular(1),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // ── "A Smartends Solution" footer ────────────────────────────────
+            Positioned(
+              bottom: size.height * 0.05,
+              left: 0,
+              right: 0,
+              child: FadeTransition(
+                opacity: _fadeAnim,
+                child: Text(
+                  'A Smartends Solution',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Montserrat',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white.withValues(alpha: 0.35),
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -101,4 +225,3 @@ class _SplashScreenState extends State<SplashScreen>
     );
   }
 }
-

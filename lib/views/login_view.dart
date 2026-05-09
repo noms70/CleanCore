@@ -28,7 +28,7 @@ class _LoginViewState extends State<LoginView> {
   @override
   void initState() {
     super.initState();
-    // _loadRememberedCredentials(); // You can re-enable this
+    _loadRememberedCredentials(); // You can re-enable this
   }
 
   @override
@@ -38,16 +38,15 @@ class _LoginViewState extends State<LoginView> {
     super.dispose();
   }
 
-  // Example of loading credentials (if you re-enable it)
-  // Future<void> _loadRememberedCredentials() async {
-  //   final userAuth = await SharedPreferences.getInstance();
-  //   if (userAuth.getBool('rememberMe') ?? false) {
-  //     setState(() {
-  //       _emailController.text = userAuth.getString('rememberedEmail') ?? '';
-  //       _rememberMe = true;
-  //     });
-  //   }
-  // }
+  Future<void> _loadRememberedCredentials() async {
+    final userAuth = await SharedPreferences.getInstance();
+    if (userAuth.getBool('rememberMe') ?? false) {
+      setState(() {
+        _emailController.text = userAuth.getString('rememberedEmail') ?? '';
+        _rememberMe = true;
+      });
+    }
+  }
 
   Future<void> _saveCredentials() async {
     final userAuth = await SharedPreferences.getInstance();
@@ -89,7 +88,32 @@ class _LoginViewState extends State<LoginView> {
     setState(() => _isLoading = false);
   }
 
+  Future<void> _googleSignIn() async {
+    setState(() => _isLoading = true);
 
+    final result = await _authService.signInWithGoogle(context);
+
+    if (!mounted) return;
+
+    if (result == null) {
+      // Success
+      showToast('Successfully logged in with Google.');
+       Navigator.pushReplacement(
+         context,
+         MaterialPageRoute(builder: (context) => const HomePage()),
+       );
+    } else {
+      // Failure
+      // Toast is already shown by AuthMethods, but we can show a generic one
+      if (result.isNotEmpty) {
+        showToast(result, isError: true);
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -112,7 +136,11 @@ class _LoginViewState extends State<LoginView> {
             SizedBox(height: screenWidth * 0.02),
             _buildSubmitButton(screenWidth),
             SizedBox(height: screenWidth * 0.02),
-            // "Don't have an account?" is handled by the parent screen's header
+            //_buildOrDivider(),
+            //_buildSocialLoginButton(
+              //logoPath: 'assets/Google.png',
+              //onPressed: _googleSignIn,
+           // ),
           ],
         ),
       ),
@@ -124,7 +152,7 @@ class _LoginViewState extends State<LoginView> {
       icon: Icons.email,
       controller: _emailController,
       labelText: 'Email',
-      hintText: 'Enter your @smartends.com email',
+      hintText: 'Enter your email',
       validator: (value) {
         if (value == null || value.isEmpty) {
           return 'Please enter your email address';
@@ -175,7 +203,10 @@ class _LoginViewState extends State<LoginView> {
           child: CheckboxListTile(
             title: Text(
               "Remember Me",
-              style: TextStyle(fontSize: screenWidth * 0.04),
+              style: TextStyle(
+                fontSize: screenWidth * 0.04,
+                color: Colors.black87,
+              ),
             ),
             value: _rememberMe,
             onChanged: (value) {
