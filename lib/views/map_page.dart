@@ -679,6 +679,69 @@ class _MapPageState extends State<MapPage> {
       );
     }
   }
+  Future<void> _viewBinImage(BinLocation bin) async {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+        contentPadding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Bin ${bin.id.length > 14 ? '${bin.id.substring(0, 14)}…' : bin.id}',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(ctx),
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+        ),
+        content: FutureBuilder<DocumentSnapshot>(
+          future: _db.collection('bins').doc(bin.id).get(),
+          builder: (ctx, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const SizedBox(
+                height: 180,
+                child: Center(child: CircularProgressIndicator(color: AppCol.btnbacks)),
+              );
+            }
+            final data = snap.data?.data() as Map<String, dynamic>?;
+            final preview = data?['imagePreview'] as String? ?? '';
+            if (preview.isEmpty) {
+              return const SizedBox(
+                height: 100,
+                child: Center(
+                  child: Text(
+                    'No image available.\nScan this bin with AI to capture one.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                ),
+              );
+            }
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(
+                base64Decode(preview),
+                fit: BoxFit.contain,
+              ),
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: AppCol.btnbacks)),
+          ),
+        ],
+      ),
+    );
+  }
 
   // ── Image source picker (camera or gallery) ──────────────────────────────
   Future<ImageSource?> _pickImageSource() {
@@ -1021,7 +1084,20 @@ class _MapPageState extends State<MapPage> {
                     ),
                   ),
                   const SizedBox(height: 8),
-
+                  OutlinedButton.icon(
+                    onPressed: () => _viewBinImage(bin),
+                    icon: const Icon(Icons.image_outlined),
+                    label: const Text('View Bin'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppCol.btnbacks,
+                      side: BorderSide(color: AppCol.btnbacks),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   // Mark Complete (disabled if already done)
                   ElevatedButton.icon(
                     onPressed: _isBinCompleted(bin.id) ? null : () => _markCollected(bin),
