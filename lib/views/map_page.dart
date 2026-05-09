@@ -69,6 +69,7 @@ class _MapPageState extends State<MapPage> {
   // Tracks bins we've already shown an alert for (prevents repeat alerts)
   final Set<String> _notifiedUrgentBins = {};
   BinLocation? _urgentAlertBin; // currently shown alert, null = no alert
+  bool _reoptimizing = false;
 
   // ── Services ─────────────────────────────────────────────────────────────
   final _api = ApiService();
@@ -355,6 +356,66 @@ class _MapPageState extends State<MapPage> {
         }
       }
     });
+  }
+
+  // ── Insert an urgent bin as the next stop in the existing active route ─────
+  // Does NOT call optimizeRoute() — that would replace the whole route because
+  // the original bins are isLocked=true and the backend ignores them.
+  Future<void> _addBinToRoute(BinLocation bin) async {
+    final route = _activeRoute;
+    if (route == null || _uid == null) return;
+
+    setState(() { _reoptimizing = true; _urgentAlertBin = null; });
+
+    try {
+      // Serialize current stops back to maps (preserving completed flags)
+      final updatedStops = route.stops.map((s) => <String, dynamic>{
+        'binId':     s.binId,
+        'lat':       s.lat,
+        'lng':       s.lng,
+        'fillLevel': s.fillLevel,
+        'wasteType': s.wasteType,
+        'area':      s.area,
+        'completed': s.completed,
+      }).toList();
+
+      // Guard: don't add if already present
+      if (updatedStops.any((s) => s['binId'] == bin.id)) {
+        if (mounted) setState(() => _reoptimizing = false);
+        return;
+      }
+
+      final newStop = <String, dynamic>{
+        'binId':     bin.id,
+        'lat':       bin.lat,
+        'lng':       bin.lng,
+        'fillLevel': bin.fullness,
+        'wasteType': bin.wasteType,
+        'area':      bin.area,
+        'completed': false,
+      };
+
+      // Insert right before the first pending stop so it becomes the next pickup
+      final firstPendingIdx = updatedStops.indexWhere((s) => s['completed'] == false);
+      if (firstPendingIdx >= 0) {
+        updatedStops.insert(firstPendingIdx, newStop);
+      } else {
+        updatedStops.add(newStop);
+      }
+
+      // Patch the route document — _subscribeToActiveRoute will redraw the polyline
+      await _db.collection('routes').doc(route.routeId).update({
+        'stops':      updatedStops,
+        'totalStops': route.totalStops + 1,
+      });
+
+      // Lock the bin so other routes don't claim it
+      await _db.collection('bins').doc(bin.id).update({'isLocked': true});
+    } catch (_) {
+      // Firestore write failed — route is unchanged, no action needed
+    }
+
+    if (mounted) setState(() => _reoptimizing = false);
   }
 
   // ── GPS: stream location and push to backend ──────────────────────────────
@@ -1372,36 +1433,72 @@ class _MapPageState extends State<MapPage> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                // Navigate to bin on map
-                                GestureDetector(
-                                  onTap: () {
-                                    final bin = _urgentAlertBin!;
-                                    setState(() => _urgentAlertBin = null);
-                                    _mapController?.animateCamera(
-                                      CameraUpdate.newCameraPosition(
-                                        CameraPosition(
-                                          target: LatLng(bin.lat, bin.lng),
-                                          zoom: 16,
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    // Re-route button — only shown when a route is already active
+                                    if (_activeRoute != null)
+                                      GestureDetector(
+                                        onTap: _reoptimizing ? null : () => _addBinToRoute(_urgentAlertBin!),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.amber.shade700,
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: _reoptimizing
+                                              ? const SizedBox(
+                                                  width: 12,
+                                                  height: 12,
+                                                  child: CircularProgressIndicator(
+                                                      strokeWidth: 1.5,
+                                                      color: Colors.white),
+                                                )
+                                              : const Text(
+                                                  'Re-route',
+                                                  style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.bold),
+                                                ),
                                         ),
                                       ),
-                                    );
-                                    _showBinDetails(bin);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.2),
-                                      borderRadius: BorderRadius.circular(8),
+                                    if (_activeRoute != null)
+                                      const SizedBox(height: 4),
+                                    // Navigate to bin on map
+                                    GestureDetector(
+                                      onTap: () {
+                                        final bin = _urgentAlertBin!;
+                                        setState(() => _urgentAlertBin = null);
+                                        _mapController?.animateCamera(
+                                          CameraUpdate.newCameraPosition(
+                                            CameraPosition(
+                                              target: LatLng(bin.lat, bin.lng),
+                                              zoom: 16,
+                                            ),
+                                          ),
+                                        );
+                                        _showBinDetails(bin);
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Text(
+                                          'View',
+                                          style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
                                     ),
-                                    child: const Text(
-                                      'View',
-                                      style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
+                                  ],
                                 ),
                                 const SizedBox(width: 4),
                                 // Dismiss
