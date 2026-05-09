@@ -975,15 +975,23 @@ class _MapPageState extends State<MapPage> {
   }
 
   Widget _detailRow(String label, String value) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(color: AppCol.textGrey, fontSize: 14)),
+        Text(label, style: TextStyle(
+          color: isDark ? Colors.grey.shade400 : AppCol.textGrey,
+          fontSize: 14,
+        )),
         Flexible(
           child: Text(
             value,
             textAlign: TextAlign.end,
-            style: const TextStyle(fontWeight: FontWeight.w600, color: AppCol.btntext, fontSize: 14),
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : AppCol.btntext,
+              fontSize: 14,
+            ),
           ),
         ),
       ],
@@ -1052,7 +1060,6 @@ class _MapPageState extends State<MapPage> {
             color: isSelected
                 ? AppCol.btnbacks
                 : isDark ? AppCol.secondary : Colors.grey.shade200,
-            width: isSelected ? 2 : 1,
           ),
           boxShadow: [
             BoxShadow(
