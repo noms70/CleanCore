@@ -26,8 +26,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final isDark   = Theme.of(context).brightness == Brightness.dark;
     final screenSz = MediaQuery.of(context).size;
 
-    // Header strip is always dark navy — consistent in both modes
-    const headerColor  = AppCol.primaryDark;
+    // Header strip matches AppBar — teal in light, navy in dark
+    final headerColor  = isDark ? AppCol.card : AppCol.primary;
     final surfaceColor = isDark ? AppCol.card : Colors.white;
 
     return Scaffold(
@@ -215,10 +215,10 @@ class _SettingsPageState extends State<SettingsPage> {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: resolvedIcon.withValues(alpha: 0.1),
+          color: AppCol.primary.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Icon(icon, color: resolvedIcon, size: 22),
+        child: Icon(icon, color: AppCol.primary, size: 22),
       ),
       title: Text(
         title,

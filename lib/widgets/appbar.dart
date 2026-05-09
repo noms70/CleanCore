@@ -22,17 +22,21 @@ class AppBuild {
           final double iconSize    = screenWidth * 0.13;
           final double fontSize    = screenWidth * 0.062;
 
-          final gradient = isDark ? AppCol.headerDark : AppCol.headerback;
-          final textColor = isDark ? Colors.white : AppCol.primaryDark;
-          final iconColor = isDark ? AppCol.primary  : AppCol.primaryDark;
+          final gradient = isDark
+              ? AppCol.headerDark
+              : const LinearGradient(
+                  colors: [AppCol.primary, AppCol.primary],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                );
+          final textColor = Colors.white;
+          final iconColor = isDark ? AppCol.primary : Colors.white;
 
           return AnnotatedRegion<SystemUiOverlayStyle>(
-            value: isDark
-                ? SystemUiOverlayStyle.light
-                : const SystemUiOverlayStyle(
-                    statusBarColor: Colors.transparent,
-                    statusBarIconBrightness: Brightness.dark,
-                  ),
+            value: const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.light,
+            ),
             child: AppBar(
               automaticallyImplyLeading: true,
               iconTheme: IconThemeData(color: textColor),

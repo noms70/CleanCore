@@ -603,7 +603,9 @@ class _HomePageState extends State<HomePage> {
           shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(bottom: Radius.circular(40)),
           ),
-          backgroundColor: AppCol.primaryDark,
+          backgroundColor: Theme.of(context).brightness == Brightness.dark
+              ? AppCol.primaryDark
+              : AppCol.primary.withValues(alpha: 0.5),
           elevation: 0,
           toolbarHeight: 80,
           title: Center(
@@ -667,31 +669,35 @@ class _HomePageState extends State<HomePage> {
                 strokeWidth: 12.0,
               ),
             ),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.delete_sweep_rounded,
-                  size: screenSize.width * 0.1,
-                  color: AppCol.primary,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$progressPercentage%',
-                  style: TextStyle(
-                    fontSize: screenSize.width * 0.1,
-                    fontWeight: FontWeight.bold,
-                    color: scheme.onSurface,
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.delete_sweep_rounded,
+                    size: screenSize.width * 0.1,
+                    color: AppCol.primary,
                   ),
-                ),
-                Text(
-                  'Route Progress',
-                  style: TextStyle(
-                    fontSize: screenSize.width * 0.04,
-                    color: scheme.onSurface.withValues(alpha: 0.5),
+                  const SizedBox(height: 6),
+                  Text(
+                    '$progressPercentage%',
+                    style: TextStyle(
+                      fontSize: screenSize.width * 0.06,
+                      fontWeight: FontWeight.bold,
+                      color: scheme.onSurface,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(
+                    'Route Progress',
+                    style: TextStyle(
+                      fontSize: screenSize.width * 0.032,
+                      color: scheme.onSurface.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

@@ -408,7 +408,45 @@ class _MapPageState extends State<MapPage> {
     setState(() => _markers = markers);
   }
 
-  void _onMapCreated(GoogleMapController c) => _mapController = c;
+  // ── Dark map style ────────────────────────────────────────────────────────
+  static const String _darkMapStyle = '''
+[
+  {"elementType":"geometry","stylers":[{"color":"#1d2c4d"}]},
+  {"elementType":"labels.text.fill","stylers":[{"color":"#8ec3b9"}]},
+  {"elementType":"labels.text.stroke","stylers":[{"color":"#1a3646"}]},
+  {"featureType":"administrative.country","elementType":"geometry.stroke","stylers":[{"color":"#4b6878"}]},
+  {"featureType":"administrative.land_parcel","elementType":"labels.text.fill","stylers":[{"color":"#64779e"}]},
+  {"featureType":"administrative.province","elementType":"geometry.stroke","stylers":[{"color":"#4b6878"}]},
+  {"featureType":"landscape.man_made","elementType":"geometry.stroke","stylers":[{"color":"#334e87"}]},
+  {"featureType":"landscape.natural","elementType":"geometry","stylers":[{"color":"#023e58"}]},
+  {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#283d6a"}]},
+  {"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#6f9ba5"}]},
+  {"featureType":"poi","elementType":"labels.text.stroke","stylers":[{"color":"#1d2c4d"}]},
+  {"featureType":"poi.park","elementType":"geometry.fill","stylers":[{"color":"#023e58"}]},
+  {"featureType":"poi.park","elementType":"labels.text.fill","stylers":[{"color":"#3C7680"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#304a7d"}]},
+  {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#98a5be"}]},
+  {"featureType":"road","elementType":"labels.text.stroke","stylers":[{"color":"#1d2c4d"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#2c6675"}]},
+  {"featureType":"road.highway","elementType":"geometry.stroke","stylers":[{"color":"#255763"}]},
+  {"featureType":"road.highway","elementType":"labels.text.fill","stylers":[{"color":"#b0d5ce"}]},
+  {"featureType":"road.highway","elementType":"labels.text.stroke","stylers":[{"color":"#023e58"}]},
+  {"featureType":"transit","elementType":"labels.text.fill","stylers":[{"color":"#98a5be"}]},
+  {"featureType":"transit","elementType":"labels.text.stroke","stylers":[{"color":"#1d2c4d"}]},
+  {"featureType":"transit.line","elementType":"geometry.fill","stylers":[{"color":"#283d6a"}]},
+  {"featureType":"transit.station","elementType":"geometry","stylers":[{"color":"#3a4762"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#0e1626"}]},
+  {"featureType":"water","elementType":"labels.text.fill","stylers":[{"color":"#4e6d70"}]}
+]
+''';
+
+  void _onMapCreated(GoogleMapController c) {
+    _mapController = c;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (isDark) {
+      c.setMapStyle(_darkMapStyle);
+    }
+  }
 
   void _recenterMap() async {
     try {
@@ -734,9 +772,10 @@ class _MapPageState extends State<MapPage> {
 
   Widget _buildBinSheet(BinLocation bin) {
     final bool isBusy = _scanning;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: isDark ? AppCol.primaryDark : Colors.white,
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(20),
           topRight: Radius.circular(20),
@@ -751,12 +790,12 @@ class _MapPageState extends State<MapPage> {
             // Header
             Row(
               children: [
-                const Text(
+                Text(
                   'Bin Details',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
-                    color: AppCol.btntext,
+                    color: isDark ? Colors.white : AppCol.btntext,
                   ),
                 ),
                 const Spacer(),
@@ -974,54 +1013,155 @@ class _MapPageState extends State<MapPage> {
   Widget _buildBinTile(BinLocation bin) {
     final isSelected = _selectedBin?.id == bin.id;
     final tileColor = bin.isCritical ? Colors.red : Colors.green;
+
+    // Determine status label & color based on fill level
+    final String statusLabel;
+    final Color statusColor;
+    if (bin.fullness >= 90) {
+      statusLabel = 'CRITICAL';
+      statusColor = Colors.red;
+    } else if (bin.fullness > 70) {
+      statusLabel = 'HIGH';
+      statusColor = Colors.orange;
+    } else if (bin.fullness > 30) {
+      statusLabel = 'NORMAL';
+      statusColor = Colors.green;
+    } else {
+      statusLabel = 'LOW';
+      statusColor = const Color(0xFF0BBFC9);
+    }
+
+    // Gradient for the accent strip at top
+    final List<Color> accentGradient = bin.isCritical
+        ? [Colors.red.shade400, Colors.red.shade700]
+        : bin.fullness > 70
+            ? [Colors.orange.shade300, Colors.orange.shade600]
+            : [const Color(0xFF0BBFC9), const Color(0xFF048A7E)];
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onTap: () => _showBinDetails(bin),
       child: Container(
-        width: 110,
+        width: 120,
         margin: const EdgeInsets.only(right: 10),
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
+          color: isDark ? AppCol.card : Colors.white,
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected ? AppCol.btnbacks : tileColor.withOpacity(0.3),
+            color: isSelected
+                ? AppCol.btnbacks
+                : isDark ? AppCol.secondary : Colors.grey.shade200,
             width: isSelected ? 2 : 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
+              color: (bin.isCritical
+                      ? Colors.red
+                      : isSelected
+                          ? AppCol.btnbacks
+                          : Colors.black)
+                  .withOpacity(bin.isCritical ? 0.18 : 0.08),
+              blurRadius: bin.isCritical ? 12 : 8,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
+            // ── Gradient accent strip ──
             Container(
-              width: 40,
-              height: 40,
+              height: 4,
               decoration: BoxDecoration(
-                color: tileColor.withOpacity(0.2),
-                shape: BoxShape.circle,
+                gradient: LinearGradient(colors: accentGradient),
               ),
-              child: Icon(Icons.delete_outline, color: tileColor, size: 20),
             ),
-            const SizedBox(height: 8),
-            Text(
-              bin.id.length > 10 ? bin.id.substring(0, 10) : bin.id,
-              style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: AppCol.btntext),
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${bin.fullness}%',
-              style: TextStyle(
-                  fontSize: 11,
-                  color: tileColor,
-                  fontWeight: FontWeight.w600),
+
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // ── Radial fill gauge ──
+                    SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            width: 44,
+                            height: 44,
+                            child: CircularProgressIndicator(
+                              value: bin.fullness / 100,
+                              strokeWidth: 3.5,
+                              backgroundColor: isDark ? AppCol.secondary : Colors.grey.shade200,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  statusColor),
+                            ),
+                          ),
+                          Icon(Icons.delete_outline,
+                              color: statusColor, size: 18),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    // ── Bin ID ──
+                    Text(
+                      bin.id.length > 10
+                          ? bin.id.substring(0, 10)
+                          : bin.id,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? Colors.white : AppCol.btntext,
+                        letterSpacing: -0.2,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    // ── Status chip with percentage ──
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${bin.fullness}%',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: statusColor,
+                            ),
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            statusLabel,
+                            style: TextStyle(
+                              fontSize: 7,
+                              fontWeight: FontWeight.w600,
+                              color: statusColor.withOpacity(0.7),
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
@@ -1059,25 +1199,59 @@ class _MapPageState extends State<MapPage> {
                       child: FloatingActionButton(
                         heroTag: 'recenter_btn',
                         onPressed: _recenterMap,
-                        backgroundColor: Colors.white,
+                        backgroundColor: Theme.of(context).brightness == Brightness.dark ? AppCol.card : Colors.white,
                         mini: true,
-                        child: const Icon(Icons.my_location, color: AppCol.btntext),
+                        child: Icon(Icons.my_location, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : AppCol.btntext),
                       ),
                     ),
 
-                    // My Route FAB — opens RouteJobScreen
+                    // My Route — opens RouteJobScreen
                     Positioned(
-                      right: 16,
-                      bottom: 300,
-                      child: FloatingActionButton.extended(
-                        heroTag: 'my_route_btn',
-                        onPressed: () => Navigator.push(
+                      left: 16,
+                      bottom: 250,
+                      child: GestureDetector(
+                        onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(builder: (_) => const RouteJobScreen()),
                         ),
-                        backgroundColor: AppCol.btnbacks,
-                        icon: const Icon(Icons.list_alt, color: Colors.white),
-                        label: const Text('My Route', style: TextStyle(color: Colors.white, fontSize: 12)),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).brightness == Brightness.dark ? AppCol.card : Colors.white,
+                            borderRadius: BorderRadius.circular(28),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.12),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 30,
+                                height: 30,
+                                decoration: BoxDecoration(
+                                  gradient: AppCol.btncol,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.route_rounded, color: Colors.white, size: 16),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'My Route',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Theme.of(context).brightness == Brightness.dark ? Colors.white : AppCol.btntext,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
 
@@ -1091,7 +1265,7 @@ class _MapPageState extends State<MapPage> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 8),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: Theme.of(context).brightness == Brightness.dark ? AppCol.card : Colors.white,
                             borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
@@ -1112,10 +1286,10 @@ class _MapPageState extends State<MapPage> {
                                   children: [
                                     Text(
                                       'Active Route — ${(_activeRoute!.progressFraction * 100).toStringAsFixed(0)}% complete',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.bold,
-                                          color: AppCol.btntext),
+                                          color: Theme.of(context).brightness == Brightness.dark ? Colors.white : AppCol.btntext),
                                     ),
                                     const SizedBox(height: 3),
                                     LinearProgressIndicator(

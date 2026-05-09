@@ -186,8 +186,8 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) {
     final isDark       = Theme.of(context).brightness == Brightness.dark;
     final screenSize   = MediaQuery.of(context).size;
-    // Header strip is always dark navy — consistent in both modes
-    const headerColor  = AppCol.primaryDark;
+    // Header strip matches AppBar — teal in light, navy in dark
+    final headerColor  = isDark ? AppCol.card : AppCol.primary;
     final surfaceColor = isDark ? AppCol.card : Colors.white;
 
     return Scaffold(

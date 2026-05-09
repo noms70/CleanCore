@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cc/models/models.dart';
 import 'package:cc/services/api_service.dart';
 import 'package:cc/utils/colors.dart';
+import 'package:cc/widgets/appbar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -566,13 +567,12 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
-      appBar: AppBar(
-        backgroundColor: AppCol.btnbacks,
-        foregroundColor: Colors.white,
-        title: const Text('My Route', style: TextStyle(fontWeight: FontWeight.bold)),
-        elevation: 0,
+      backgroundColor: isDark ? AppCol.primaryDark : const Color(0xFFF5F7FA),
+      appBar: AppBuild().buildAppBar(
+        title: 'My Route',
+        icon: Icons.route_rounded,
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppCol.btnbacks))
@@ -746,17 +746,18 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
   }
 
   Widget _buildNoRoute() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.route, size: 72, color: Colors.grey.shade300),
+            Icon(Icons.route, size: 72, color: isDark ? Colors.grey.shade600 : Colors.grey.shade300),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'No Active Route',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppCol.btntext),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: isDark ? Colors.white : AppCol.btntext),
             ),
             const SizedBox(height: 8),
             Text(
@@ -764,7 +765,7 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
               'the highest-priority bins in your assigned area and order them '
               'for the shortest drive.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 14, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
             ),
             if (_genError != null) ...[
               const SizedBox(height: 12),
@@ -895,11 +896,11 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
         const SizedBox(height: 20),
 
         // ── Stop list ──────────────────────────────────────────────────────
-        const Padding(
-          padding: EdgeInsets.only(left: 4, bottom: 8),
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
           child: Text(
             'Stops (in order)',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppCol.btntext),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : AppCol.btntext),
           ),
         ),
 
@@ -939,16 +940,17 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
             ? Colors.orange
             : Colors.green;
 
+    final cardIsDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cardIsDark ? AppCol.card : Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: isDone
             ? Border.all(color: Colors.green.shade200, width: 1.5)
-            : Border.all(color: Colors.grey.shade200),
+            : Border.all(color: cardIsDark ? AppCol.secondary : Colors.grey.shade200),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 6, offset: const Offset(0, 2)),
+          BoxShadow(color: Colors.black.withOpacity(cardIsDark ? 0.2 : 0.05), blurRadius: 6, offset: const Offset(0, 2)),
         ],
       ),
       child: Padding(
@@ -982,12 +984,12 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
                     children: [
                       Text(
                         stop.binId,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppCol.btntext),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: cardIsDark ? Colors.white : AppCol.btntext),
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
                         stop.area.isNotEmpty ? stop.area : stop.wasteType,
-                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        style: TextStyle(fontSize: 12, color: cardIsDark ? Colors.grey.shade500 : Colors.grey),
                       ),
                     ],
                   ),
@@ -1016,7 +1018,7 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
               child: LinearProgressIndicator(
                 value: stop.fillLevel / 100,
                 minHeight: 6,
-                backgroundColor: Colors.grey.shade100,
+                backgroundColor: cardIsDark ? AppCol.secondary : Colors.grey.shade100,
                 valueColor: AlwaysStoppedAnimation<Color>(fillColor),
               ),
             ),
