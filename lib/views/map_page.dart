@@ -71,6 +71,9 @@ class _MapPageState extends State<MapPage> {
   BinLocation? _urgentAlertBin; // currently shown alert, null = no alert
   bool _reoptimizing = false;
 
+  // ── Reverse-geocoded display names for bin tiles ──────────────────────────
+  final Map<String, String> _binLocationNames = {};
+
   // ── Services ─────────────────────────────────────────────────────────────
   final _api = ApiService();
   final _db = FirebaseFirestore.instance;
@@ -171,6 +174,39 @@ class _MapPageState extends State<MapPage> {
         _bins = filtered;
         _generateMarkers();
       });
+      _fetchBinNamesForNewBins(filtered);
+    }
+  }
+
+  // Reverse-geocodes each bin that isn't already in the cache, 250 ms apart
+  // to stay within Nominatim's 1-req/sec policy.
+  Future<void> _fetchBinNamesForNewBins(List<BinLocation> bins) async {
+    final newBins = bins.where((b) => !_binLocationNames.containsKey(b.id)).toList();
+    for (final bin in newBins) {
+      if (!mounted) return;
+      try {
+        final uri = Uri.parse(
+          'https://nominatim.openstreetmap.org/reverse'
+          '?format=json&lat=${bin.lat}&lon=${bin.lng}',
+        );
+        final resp = await http.get(uri, headers: {'User-Agent': 'CleanCore/1.0'});
+        if (resp.statusCode == 200) {
+          final data = json.decode(resp.body) as Map<String, dynamic>;
+          final addr = data['address'] as Map<String, dynamic>? ?? {};
+          final topName = (data['name'] as String?)?.trim() ?? '';
+          final name = topName.isNotEmpty
+              ? topName
+              : (addr['amenity'] as String?)?.trim() ??
+                (addr['shop'] as String?)?.trim() ??
+                (addr['building'] as String?)?.trim() ??
+                (addr['road'] as String?)?.trim() ??
+                (addr['suburb'] as String?)?.trim();
+          if (name != null && name.isNotEmpty && mounted) {
+            setState(() => _binLocationNames[bin.id] = name);
+          }
+        }
+      } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 250));
     }
   }
 
@@ -1185,11 +1221,9 @@ class _MapPageState extends State<MapPage> {
 
                     const SizedBox(height: 4),
 
-                    // ── Bin ID ──
+                    // ── Location name (resolved via reverse geocoding, else bin ID) ──
                     Text(
-                      bin.id.length > 10
-                          ? bin.id.substring(0, 10)
-                          : bin.id,
+                      _binLocationNames[bin.id] ?? bin.id,
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,

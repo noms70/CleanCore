@@ -297,7 +297,7 @@ class _HomePageState extends State<HomePage> {
         .where('status', isEqualTo: 'active')
         .limit(1)
         .snapshots()
-        .listen((snap) {
+        .listen((snap) async {
       if (!mounted) return;
       if (snap.docs.isEmpty) {
         setState(() {
@@ -310,11 +310,25 @@ class _HomePageState extends State<HomePage> {
         return;
       }
       final route = ActiveRoute.fromFirestore(snap.docs.first);
+
+      // Count all routes this driver has made for the same area to derive
+      // an incremental route number (e.g. "Wah · 3").
+      int routeNumber = 1;
+      if (route.assignedArea.isNotEmpty) {
+        final countSnap = await _db
+            .collection('routes')
+            .where('driverId', isEqualTo: uid)
+            .where('assignedArea', isEqualTo: route.assignedArea)
+            .get();
+        routeNumber = countSnap.docs.length;
+      }
+
+      if (!mounted) return;
       setState(() {
         completedBins = route.completedStops;
         totalBins = route.totalStops;
-        routeId = route.routeId.length > 12
-            ? '${route.routeId.substring(0, 12)}…'
+        routeId = route.assignedArea.isNotEmpty
+            ? '${route.assignedArea} · $routeNumber'
             : route.routeId;
         estimatedFuel = route.estimatedFuel;
         currentStatus = 'On Route';
@@ -748,7 +762,7 @@ class _HomePageState extends State<HomePage> {
             childAspectRatio: 1.55,
             children: [
               _buildMetricCard(
-                title: 'Route ID',
+                title: 'Route',
                 value: routeId,
                 icon: Icons.alt_route_rounded,
                 accentColor: AppCol.primary,
