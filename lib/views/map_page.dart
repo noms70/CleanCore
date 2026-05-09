@@ -1109,7 +1109,14 @@ class _MapPageState extends State<MapPage> {
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
-      onTap: () => _showBinDetails(bin),
+      onTap: () {
+        _mapController?.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(target: LatLng(bin.lat, bin.lng), zoom: 17),
+          ),
+        );
+        _showBinDetails(bin);
+      },
       child: Container(
         width: 120,
         margin: const EdgeInsets.only(right: 10),
@@ -1539,13 +1546,17 @@ class _MapPageState extends State<MapPage> {
                         padding: const EdgeInsets.only(bottom: 90),
                         child: SizedBox(
                           height: 140,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 12),
-                            itemCount: _bins.length,
-                            itemBuilder: (_, i) => _buildBinTile(_bins[i]),
-                          ),
+                          child: Builder(builder: (context) {
+                            final sorted = [..._bins]
+                              ..sort((a, b) => b.fullness.compareTo(a.fullness));
+                            return ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 12),
+                              itemCount: sorted.length,
+                              itemBuilder: (_, i) => _buildBinTile(sorted[i]),
+                            );
+                          }),
                         ),
                       ),
                     ),
