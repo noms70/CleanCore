@@ -1070,7 +1070,7 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
                   children: [
                     // Mark Complete (full width, primary action)
                     ElevatedButton.icon(
-                      onPressed: () => _completeStop(stop),
+                      onPressed: stop.fillLevel == 0 ? null : () => _completeStop(stop),
                       icon: const Icon(Icons.check_circle_outline, size: 16),
                       label: const Text('Mark Complete',
                           style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),

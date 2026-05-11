@@ -1,6 +1,5 @@
 import 'package:cc/utils/colors.dart';
 import 'package:cc/views/login_view.dart';
-import 'package:cc/views/signup_view.dart';
 import 'package:flutter/material.dart';
 
 class AuthLandingScreen extends StatefulWidget {
@@ -68,7 +67,6 @@ class _AuthLandingScreenState extends State<AuthLandingScreen> {
                   onPageChanged: _onPageChanged,
                   children: const [
                     LoginView(), // New separate widget
-                    SignupView(), // New separate widget
                   ],
                 ),
               ),
@@ -102,10 +100,6 @@ class _AuthLandingScreenState extends State<AuthLandingScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               _buildHeaderTab("Login", _isLogin, () => _onTabTapped(0)),
-              SizedBox(
-                width: isPortrait ? screenWidth * 0.05 : screenWidth * 0.04,
-              ),
-              _buildHeaderTab("Sign up", !_isLogin, () => _onTabTapped(1)),
             ],
           ),
         ],

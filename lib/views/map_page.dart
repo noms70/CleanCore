@@ -641,6 +641,7 @@ class _MapPageState extends State<MapPage> {
   // Backend increments completedStops and resets fillLevel to 0.
   Future<void> _markCollected(BinLocation bin) async {
     if (_activeRoute == null) {
+      Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No active route. Tap "My Route" to generate one first.'),
@@ -671,6 +672,7 @@ class _MapPageState extends State<MapPage> {
         ),
       );
     } else {
+      Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Failed to mark stop. Check connection.'),
