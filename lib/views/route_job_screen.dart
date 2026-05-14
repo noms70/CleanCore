@@ -38,6 +38,7 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
 
   // Tracks which stops are currently being submitted to avoid double-taps
   final Set<String> _busyBins = {};
+  final Set<String> _skippingBins = {};
 
   // AI scan state per stop
   final Map<String, Map<String, dynamic>> _scanResults = {};
@@ -323,6 +324,114 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
         backgroundColor: success ? Colors.orange : Colors.red,
       ),
     );
+  }
+
+  Future<void> _skipStop(RouteStop stop) async {
+    if (_route == null || _busyBins.contains(stop.binId) || _skippingBins.contains(stop.binId)) return;
+
+    const types = [
+      {'key': 'bin_inaccessible',   'label': 'Bin Inaccessible',   'icon': Icons.lock_outline},
+      {'key': 'bin_damaged',        'label': 'Bin Damaged',         'icon': Icons.construction_outlined},
+      {'key': 'hazardous_material', 'label': 'Hazardous Material',  'icon': Icons.warning_amber_rounded},
+    ];
+
+    final noteController = TextEditingController();
+    Map<String, dynamic>? selected;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 12, 20, MediaQuery.of(ctx).viewInsets.bottom + 32),
+        child: StatefulBuilder(builder: (ctx, setSheet) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+            ),
+            const SizedBox(height: 14),
+            const Text('Skip Stop', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 2),
+            Text(
+              'Bin ${stop.binId.length > 12 ? '${stop.binId.substring(0, 12)}…' : stop.binId}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            ...types.map((t) => ListTile(
+              leading: Icon(t['icon'] as IconData, color: Colors.amber.shade700),
+              title: Text(t['label'] as String),
+              trailing: selected?['key'] == t['key']
+                  ? const Icon(Icons.check_circle, color: Colors.amber)
+                  : null,
+              dense: true,
+              onTap: () => setSheet(() => selected = t),
+            )),
+            const SizedBox(height: 8),
+            TextField(
+              controller: noteController,
+              decoration: InputDecoration(
+                hintText: 'Optional note (e.g. gate locked, visible damage)',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+              maxLines: 2,
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: selected == null ? null : () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber.shade700,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                child: const Text('Confirm Skip'),
+              ),
+            ),
+          ],
+        )),
+      ),
+    );
+
+    if (selected == null || !mounted) return;
+
+    setState(() => _skippingBins.add(stop.binId));
+
+    final result = await _api.skipStop(
+      routeId:       _route!.routeId,
+      binId:         stop.binId,
+      workerId:      _uid ?? '',
+      exceptionType: selected!['key'] as String,
+      note:          noteController.text.trim(),
+    );
+
+    if (!mounted) return;
+    setState(() => _skippingBins.remove(stop.binId));
+
+    if (result != null && result['success'] == true) {
+      if (result['route_status'] == 'completed') _showCompletionSummary();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Stop skipped — exception logged'),
+          backgroundColor: Colors.amber,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result?['error'] == 'already_skipped'
+              ? 'Stop already skipped.'
+              : 'Failed to skip stop. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<ImageSource?> _pickImageSource() {
@@ -933,7 +1042,9 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
   }
 
   Widget _buildStopCard(RouteStop stop, int stopNumber, bool isDone) {
-    final isBusy = _busyBins.contains(stop.binId);
+    final isBusy      = _busyBins.contains(stop.binId);
+    final isSkipping  = _skippingBins.contains(stop.binId);
+    final isSkipped   = stop.skipped;
     final fillColor = stop.fillLevel >= 90
         ? Colors.red
         : stop.fillLevel >= 70
@@ -944,11 +1055,15 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: cardIsDark ? AppCol.card : Colors.white,
+        color: isSkipped
+            ? (cardIsDark ? Colors.grey.shade900 : Colors.grey.shade50)
+            : (cardIsDark ? AppCol.card : Colors.white),
         borderRadius: BorderRadius.circular(14),
         border: isDone
             ? Border.all(color: Colors.green.shade200, width: 1.5)
-            : Border.all(color: cardIsDark ? AppCol.secondary : Colors.grey.shade200),
+            : isSkipped
+                ? Border.all(color: Colors.amber.shade300, width: 1.5)
+                : Border.all(color: cardIsDark ? AppCol.secondary : Colors.grey.shade200),
         boxShadow: [
           BoxShadow(color: Colors.black.withOpacity(cardIsDark ? 0.2 : 0.05), blurRadius: 6, offset: const Offset(0, 2)),
         ],
@@ -1029,27 +1144,35 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
               _buildScanResult(stop.binId),
             ],
 
-            // Completed badge — shown when this stop is marked done
-            if (isDone) ...[
+            // Status badge — collected or skipped
+            if (isDone || isSkipped) ...[
               const SizedBox(height: 10),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: isDone ? Colors.green.shade50 : Colors.amber.shade50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade300),
+                  border: Border.all(
+                    color: isDone ? Colors.green.shade300 : Colors.amber.shade400,
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.check_circle, color: Colors.green.shade600, size: 16),
+                    Icon(
+                      isDone ? Icons.check_circle : Icons.block,
+                      color: isDone ? Colors.green.shade600 : Colors.amber.shade700,
+                      size: 16,
+                    ),
                     const SizedBox(width: 6),
                     Text(
-                      'Collected ✓',
+                      isDone
+                          ? 'Collected ✓'
+                          : 'SKIPPED — ${stop.exceptionType?.replaceAll('_', ' ') ?? ''}',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: Colors.green.shade700,
+                        color: isDone ? Colors.green.shade700 : Colors.amber.shade800,
                       ),
                     ),
                   ],
@@ -1057,11 +1180,11 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
               ),
             ],
 
-            // Action buttons — shown only for pending stops
-            if (!isDone) ...[
+            // Action buttons — shown only for pending (not completed, not skipped) stops
+            if (!isDone && !isSkipped) ...[
               const SizedBox(height: 12),
 
-              if (isBusy)
+              if (isBusy || isSkipping)
                 const Center(child: SizedBox(height: 28, width: 28,
                     child: CircularProgressIndicator(strokeWidth: 2, color: AppCol.btnbacks)))
               else
@@ -1078,6 +1201,20 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // Skip Stop (amber, operational exception)
+                    OutlinedButton.icon(
+                      onPressed: () => _skipStop(stop),
+                      icon: Icon(Icons.block, size: 15, color: Colors.amber.shade700),
+                      label: Text('Skip Stop',
+                          style: TextStyle(fontSize: 12, color: Colors.amber.shade800)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.amber.shade800,
+                        side: BorderSide(color: Colors.amber.shade400),
+                        padding: const EdgeInsets.symmetric(vertical: 9),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),

@@ -298,7 +298,7 @@ class _MapPageState extends State<MapPage> {
         ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
         : LatLng(widget.driverLat, widget.driverLng);
 
-    final pending = _activeRoute!.stops.where((s) => !s.completed).toList();
+    final pending = _activeRoute!.stops.where((s) => !s.completed && !s.skipped).toList();
     if (pending.isEmpty) {
       if (mounted) setState(() => _polylines.clear());
       return;
@@ -801,23 +801,18 @@ class _MapPageState extends State<MapPage> {
     // Read image bytes (works on both web and mobile)
     final bytes = await picked.readAsBytes();
 
-    final result = await _api.analyzeBin(
+    final result = await _api.rescanBin(
+      binId:      bin.id,
       imageBytes: bytes,
-      imageName: picked.name,
-      binId: bin.id,                  // updates existing Firestore doc
-      area: _assignedArea.isNotEmpty  // keeps bin in the worker's routing pool
-          ? _assignedArea
-          : bin.area,
-      lat: bin.lat,
-      lng: bin.lng,
+      imageName:  picked.name,
     );
 
     if (!mounted) return;
     setState(() => _scanning = false);
 
     if (result != null) {
-      final fill = result['results']?['fill_level']?['value'] ?? 0;
-      final waste = result['results']?['fill_level']?['status'] ?? '—';
+      final fill  = result['fillLevel'] ?? 0;
+      final waste = result['wasteType'] ?? '—';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Scanned: $fill% full · $waste'),

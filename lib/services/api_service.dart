@@ -83,6 +83,34 @@ class ApiService {
     }
   }
 
+  // ── 1b. Re-scan an existing bin (updates fill/waste/image, preserves lat/lng/area) ──
+  Future<Map<String, dynamic>?> rescanBin({
+    required String binId,
+    required List<int> imageBytes,
+    String imageName = 'capture.jpg',
+  }) async {
+    try {
+      final uri = Uri.parse('$_base/rescan-bin/$binId');
+      final request = http.MultipartRequest('POST', uri)
+        ..headers.addAll(_baseHeaders)
+        ..files.add(http.MultipartFile.fromBytes(
+          'image_file',
+          imageBytes,
+          filename: imageName,
+        ));
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      _log('rescanBin', response.statusCode, response.body);
+      return null;
+    } catch (e) {
+      _log('rescanBin', 0, e.toString());
+      return null;
+    }
+  }
+
   // ── 2. Update driver GPS ──────────────────────────────────────────────────
   // Field name: driver_id (NOT worker_id). Backend merges lat/lng into the
   // 'users' document so the Admin Panel map shows live driver positions.
@@ -138,6 +166,101 @@ class ApiService {
       return null;
     } catch (e) {
       _log('completeStop', 0, e.toString());
+      return null;
+    }
+  }
+
+  // ── 3b. Skip a stop with an exception reason ────────────────────────────
+  Future<Map<String, dynamic>?> skipStop({
+    required String routeId,
+    required String binId,
+    required String workerId,
+    required String exceptionType,
+    String note = '',
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_base/skip-stop'),
+        headers: _jsonHeaders,
+        body: json.encode({
+          'route_id':       routeId,
+          'bin_id':         binId,
+          'worker_id':      workerId,
+          'exception_type': exceptionType,
+          'exception_note': note,
+        }),
+      );
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      if (response.statusCode == 409) {
+        final body = json.decode(response.body) as Map<String, dynamic>;
+        return {'error': body['detail'] ?? 'conflict'};
+      }
+      _log('skipStop', response.statusCode, response.body);
+      return null;
+    } catch (e) {
+      _log('skipStop', 0, e.toString());
+      return null;
+    }
+  }
+
+  // ── 3c. Clock in / out shift management ─────────────────────────────────
+  Future<Map<String, dynamic>?> clockIn({required String workerId}) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_base/clock-in'),
+        headers: _jsonHeaders,
+        body: json.encode({'worker_id': workerId}),
+      );
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      if (response.statusCode == 409) {
+        return {'error': 'already_clocked_in'};
+      }
+      _log('clockIn', response.statusCode, response.body);
+      return null;
+    } catch (e) {
+      _log('clockIn', 0, e.toString());
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> clockOut({required String workerId}) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_base/clock-out'),
+        headers: _jsonHeaders,
+        body: json.encode({'worker_id': workerId}),
+      );
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      if (response.statusCode == 409) {
+        return {'error': 'not_clocked_in'};
+      }
+      _log('clockOut', response.statusCode, response.body);
+      return null;
+    } catch (e) {
+      _log('clockOut', 0, e.toString());
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getShiftStatus(String workerId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_base/worker/shift-status/$workerId'),
+        headers: _jsonHeaders,
+      );
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      _log('getShiftStatus', response.statusCode, response.body);
+      return null;
+    } catch (e) {
+      _log('getShiftStatus', 0, e.toString());
       return null;
     }
   }

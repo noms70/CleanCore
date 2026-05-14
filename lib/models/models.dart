@@ -98,6 +98,9 @@ class RouteStop {
   final String area;
   /// Set to true by the backend when the worker completes this stop.
   final bool completed;
+  final bool skipped;
+  final String? exceptionType;
+  final String? exceptionNote;
 
   RouteStop({
     required this.binId,
@@ -107,17 +110,23 @@ class RouteStop {
     required this.wasteType,
     required this.area,
     this.completed = false,
+    this.skipped = false,
+    this.exceptionType,
+    this.exceptionNote,
   });
 
   factory RouteStop.fromMap(Map<String, dynamic> m) {
     return RouteStop(
-      binId:     m['binId'] as String? ?? '',
-      lat:       ((m['lat'] ?? 0.0) as num).toDouble(),
-      lng:       ((m['lng'] ?? 0.0) as num).toDouble(),
-      fillLevel: ((m['fillLevel'] ?? 0) as num).toInt(),
-      wasteType: m['wasteType'] as String? ?? 'Unknown',
-      area:      m['area'] as String? ?? '',
-      completed: m['completed'] as bool? ?? false,
+      binId:         m['binId'] as String? ?? '',
+      lat:           ((m['lat'] ?? 0.0) as num).toDouble(),
+      lng:           ((m['lng'] ?? 0.0) as num).toDouble(),
+      fillLevel:     ((m['fillLevel'] ?? 0) as num).toInt(),
+      wasteType:     m['wasteType'] as String? ?? 'Unknown',
+      area:          m['area'] as String? ?? '',
+      completed:     m['completed'] as bool? ?? false,
+      skipped:       m['skipped'] as bool? ?? false,
+      exceptionType: m['exceptionType'] as String?,
+      exceptionNote: m['exceptionNote'] as String?,
     );
   }
 }
@@ -135,6 +144,7 @@ class ActiveRoute {
   final String assignedArea;
   final String assignedWasteType;
   final List<RouteStop> stops;
+  final int skippedStops;
 
   ActiveRoute({
     required this.routeId,
@@ -148,6 +158,7 @@ class ActiveRoute {
     this.assignedArea = '',
     this.assignedWasteType = '',
     this.stops = const [],
+    this.skippedStops = 0,
   });
 
   factory ActiveRoute.fromFirestore(DocumentSnapshot doc) {
@@ -164,6 +175,7 @@ class ActiveRoute {
       carbonFootprintKg: ((d['carbonFootprintKg'] ?? 0.0) as num).toDouble(),
       assignedArea:      d['assignedArea'] as String? ?? '',
       assignedWasteType: d['assignedWasteType'] as String? ?? '',
+      skippedStops:      ((d['skippedStops'] ?? 0) as num).toInt(),
       stops: rawStops
           .map((s) => RouteStop.fromMap(s as Map<String, dynamic>))
           .toList(),

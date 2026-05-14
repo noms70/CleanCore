@@ -16,6 +16,7 @@ import '../widgets/navbar.dart';
 import './map_page.dart';
 import './settings_page.dart';
 import '../widgets/inactivity_wrapper.dart';
+import '../services/api_service.dart';
 
 // =========================================================================
 // 1. **FIXED ERROR:** ProgressPainter must be a top-level class.
@@ -238,7 +239,15 @@ class _HomePageState extends State<HomePage> {
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final ApiService _api = ApiService();
   UserModel? _user;
+
+  // Shift management state
+  bool _isClockedIn = false;
+  String? _currentShiftId;
+  DateTime? _clockInTime;
+  Timer? _shiftTimer;
+  int _shiftElapsedSeconds = 0;
 
   // Driver information
   String currentStatus = 'Offline';
@@ -276,13 +285,196 @@ class _HomePageState extends State<HomePage> {
     _initializeUserData();
     _subscribeToRouteData();
     _subscribeToBinStats();
+    _loadShiftStatus();
   }
 
   @override
   void dispose() {
     _routeSub?.cancel();
     _binsSub?.cancel();
+    _shiftTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadShiftStatus() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final result = await _api.getShiftStatus(uid);
+    if (!mounted || result == null) return;
+    final clocked = result['is_clocked_in'] as bool? ?? false;
+    setState(() {
+      _isClockedIn    = clocked;
+      _currentShiftId = result['shift_id'] as String?;
+      final raw = result['clock_in_time'] as String?;
+      _clockInTime    = raw != null ? DateTime.tryParse(raw)?.toLocal() : null;
+      if (clocked && _clockInTime != null) {
+        _shiftElapsedSeconds = DateTime.now().difference(_clockInTime!).inSeconds;
+      }
+    });
+    if (clocked) _startShiftTimer();
+  }
+
+  void _startShiftTimer() {
+    _shiftTimer?.cancel();
+    _shiftTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _shiftElapsedSeconds++);
+    });
+  }
+
+  String _formatElapsed(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _onClockIn() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Start Shift'),
+        content: Text('Clock in at ${TimeOfDay.now().format(context)}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Clock In')),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    final result = await _api.clockIn(workerId: uid);
+    if (!mounted) return;
+    if (result != null && result['success'] == true) {
+      setState(() {
+        _isClockedIn         = true;
+        _currentShiftId      = result['shift_id'] as String?;
+        _clockInTime         = DateTime.now();
+        _shiftElapsedSeconds = 0;
+      });
+      _startShiftTimer();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Shift started'), backgroundColor: Colors.green),
+      );
+    } else if (result?['error'] == 'already_clocked_in') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You are already clocked in'), backgroundColor: Colors.orange),
+      );
+    }
+  }
+
+  Future<void> _onClockOut() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('End Shift'),
+        content: const Text('Are you sure you want to clock out?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clock Out', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    final result = await _api.clockOut(workerId: uid);
+    if (!mounted) return;
+    if (result != null && result['success'] == true) {
+      _shiftTimer?.cancel();
+      setState(() {
+        _isClockedIn         = false;
+        _currentShiftId      = null;
+        _clockInTime         = null;
+        _shiftElapsedSeconds = 0;
+      });
+      final mins    = result['duration_minutes'] as int? ?? 0;
+      final routes  = result['routes_completed'] as int? ?? 0;
+      final colls   = result['collections_completed'] as int? ?? 0;
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Shift Complete'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Duration: ${mins ~/ 60}h ${mins % 60}m'),
+                Text('Routes completed: $routes'),
+                Text('Collections: $colls'),
+              ],
+            ),
+            actions: [
+              ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+            ],
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildShiftBanner() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: _isClockedIn
+            ? Colors.amber.shade700.withValues(alpha: isDark ? 0.25 : 0.12)
+            : AppCol.primary.withValues(alpha: isDark ? 0.25 : 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _isClockedIn ? Colors.amber.shade400 : AppCol.primary.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _isClockedIn ? Icons.access_time_filled : Icons.login,
+            color: _isClockedIn ? Colors.amber.shade700 : AppCol.primary,
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _isClockedIn ? 'On Shift' : 'Not Clocked In',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: _isClockedIn ? Colors.amber.shade800 : AppCol.primary,
+                  ),
+                ),
+                if (_isClockedIn)
+                  Text(
+                    _formatElapsed(_shiftElapsedSeconds),
+                    style: TextStyle(fontSize: 12, color: Colors.amber.shade700),
+                  ),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            onPressed: _isClockedIn ? _onClockOut : _onClockIn,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isClockedIn ? Colors.red : AppCol.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+            child: Text(_isClockedIn ? 'Clock Out' : 'Clock In'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Listen to the driver's active route in Firestore.
@@ -651,11 +843,13 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         children: [
           _buildUserInfo(context, screenSize),
-          const SizedBox(height: 20),
-          _buildCircularProgressSection(screenSize), // NEW SECTION
+          const SizedBox(height: 12),
+          _buildShiftBanner(),
+          const SizedBox(height: 16),
+          _buildCircularProgressSection(screenSize),
           const SizedBox(height: 30),
-          _buildKeyRouteMetricsGrid(screenSize), // NEW SECTION
-          const SizedBox(height: 100), // Extra space for NavBar clearance
+          _buildKeyRouteMetricsGrid(screenSize),
+          const SizedBox(height: 100),
         ],
       ),
     );
