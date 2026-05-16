@@ -248,6 +248,8 @@ class _HomePageState extends State<HomePage> {
   DateTime? _clockInTime;
   Timer? _shiftTimer;
   int _shiftElapsedSeconds = 0;
+  Map<String, dynamic>? _scheduledShift;
+  StreamSubscription<QuerySnapshot>? _scheduleSub;
 
   // Driver information
   String currentStatus = 'Offline';
@@ -286,6 +288,7 @@ class _HomePageState extends State<HomePage> {
     _subscribeToRouteData();
     _subscribeToBinStats();
     _loadShiftStatus();
+    _subscribeToSchedule();
   }
 
   @override
@@ -293,7 +296,29 @@ class _HomePageState extends State<HomePage> {
     _routeSub?.cancel();
     _binsSub?.cancel();
     _shiftTimer?.cancel();
+    _scheduleSub?.cancel();
     super.dispose();
+  }
+
+  void _subscribeToSchedule() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final today = DateTime.now();
+    final dateStr =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    _scheduleSub = _db
+        .collection('shiftSchedules')
+        .where('workerId', isEqualTo: uid)
+        .where('scheduledDate', isEqualTo: dateStr)
+        .where('status', isEqualTo: 'scheduled')
+        .limit(1)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      setState(() {
+        _scheduledShift = snap.docs.isNotEmpty ? snap.docs.first.data() : null;
+      });
+    });
   }
 
   Future<void> _loadShiftStatus() async {
@@ -421,23 +446,35 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildShiftBanner() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Determine banner colour: amber=on shift, teal=scheduled, blue=no schedule
+    final hasSchedule = _scheduledShift != null;
+    final bannerColor = _isClockedIn
+        ? Colors.amber.shade700
+        : hasSchedule
+            ? Colors.teal.shade600
+            : AppCol.primary;
+    final bannerAlpha = isDark ? 0.25 : 0.12;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: _isClockedIn
-            ? Colors.amber.shade700.withValues(alpha: isDark ? 0.25 : 0.12)
-            : AppCol.primary.withValues(alpha: isDark ? 0.25 : 0.10),
+        color: bannerColor.withValues(alpha: bannerAlpha),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: _isClockedIn ? Colors.amber.shade400 : AppCol.primary.withValues(alpha: 0.4),
+          color: bannerColor.withValues(alpha: isDark ? 0.5 : 0.4),
         ),
       ),
       child: Row(
         children: [
           Icon(
-            _isClockedIn ? Icons.access_time_filled : Icons.login,
-            color: _isClockedIn ? Colors.amber.shade700 : AppCol.primary,
+            _isClockedIn
+                ? Icons.access_time_filled
+                : hasSchedule
+                    ? Icons.event_available
+                    : Icons.login,
+            color: bannerColor,
             size: 22,
           ),
           const SizedBox(width: 10),
@@ -446,17 +483,28 @@ class _HomePageState extends State<HomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _isClockedIn ? 'On Shift' : 'Not Clocked In',
+                  _isClockedIn
+                      ? 'On Shift'
+                      : hasSchedule
+                          ? 'Shift Today: ${_scheduledShift!['startTime']} – ${_scheduledShift!['endTime']}'
+                          : 'No Shift Scheduled',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
-                    color: _isClockedIn ? Colors.amber.shade800 : AppCol.primary,
+                    color: bannerColor,
                   ),
                 ),
                 if (_isClockedIn)
                   Text(
                     _formatElapsed(_shiftElapsedSeconds),
                     style: TextStyle(fontSize: 12, color: Colors.amber.shade700),
+                  )
+                else if (hasSchedule && (_scheduledShift!['note'] as String?)?.isNotEmpty == true)
+                  Text(
+                    _scheduledShift!['note'] as String,
+                    style: TextStyle(fontSize: 11, color: Colors.teal.shade600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
               ],
             ),
@@ -464,7 +512,7 @@ class _HomePageState extends State<HomePage> {
           ElevatedButton(
             onPressed: _isClockedIn ? _onClockOut : _onClockIn,
             style: ElevatedButton.styleFrom(
-              backgroundColor: _isClockedIn ? Colors.red : AppCol.primary,
+              backgroundColor: _isClockedIn ? Colors.red : bannerColor,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
