@@ -250,6 +250,9 @@ class _HomePageState extends State<HomePage> {
   int _shiftElapsedSeconds = 0;
   Map<String, dynamic>? _scheduledShift;
   StreamSubscription<QuerySnapshot>? _scheduleSub;
+  DateTime? _shiftStartTime;     // parsed from scheduledShift.startTime
+  int _secondsUntilShift = 0;    // live countdown
+  Timer? _countdownTimer;
 
   // Driver information
   String currentStatus = 'Offline';
@@ -297,6 +300,7 @@ class _HomePageState extends State<HomePage> {
     _binsSub?.cancel();
     _shiftTimer?.cancel();
     _scheduleSub?.cancel();
+    _countdownTimer?.cancel();
     super.dispose();
   }
 
@@ -315,9 +319,44 @@ class _HomePageState extends State<HomePage> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
+      if (!mounted) return;
+      final data = snap.docs.isNotEmpty ? snap.docs.first.data() : null;
       setState(() {
-        _scheduledShift = snap.docs.isNotEmpty ? snap.docs.first.data() : null;
+        _scheduledShift = data;
+        _shiftStartTime = data != null ? _parseShiftStart(data['startTime'] as String? ?? '') : null;
       });
+      _restartCountdown();
+    });
+  }
+
+  DateTime? _parseShiftStart(String timeStr) {
+    final parts = timeStr.split(':');
+    if (parts.length != 2) return null;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null) return null;
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, h, m);
+  }
+
+  bool get _isShiftStarted {
+    if (_shiftStartTime == null) return true; // no schedule = no restriction
+    return DateTime.now().isAfter(_shiftStartTime!.subtract(const Duration(minutes: 5)));
+  }
+
+  void _restartCountdown() {
+    _countdownTimer?.cancel();
+    if (_isClockedIn || _shiftStartTime == null || _isShiftStarted) return;
+    _secondsUntilShift = _shiftStartTime!.difference(DateTime.now()).inSeconds;
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) { _countdownTimer?.cancel(); return; }
+      final remaining = _shiftStartTime!.difference(DateTime.now()).inSeconds;
+      if (remaining <= 0) {
+        _countdownTimer?.cancel();
+        setState(() => _secondsUntilShift = 0);
+      } else {
+        setState(() => _secondsUntilShift = remaining);
+      }
     });
   }
 
@@ -337,6 +376,7 @@ class _HomePageState extends State<HomePage> {
       }
     });
     if (clocked) _startShiftTimer();
+    if (!clocked) _restartCountdown();
   }
 
   void _startShiftTimer() {
@@ -357,6 +397,32 @@ class _HomePageState extends State<HomePage> {
   Future<void> _onClockIn() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
+
+    // Block clock-in if no shift is scheduled for today
+    if (_scheduledShift == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('No shift scheduled for today. Contact your admin.'),
+        backgroundColor: Colors.red.shade700,
+        duration: const Duration(seconds: 4),
+      ));
+      return;
+    }
+
+    // Block clock-in if scheduled shift exists but hasn't started yet
+    if (!_isShiftStarted && _shiftStartTime != null) {
+      final start = _shiftStartTime!;
+      final timeStr =
+          '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}';
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Your shift starts at $timeStr. Please wait.'),
+        backgroundColor: Colors.orange.shade700,
+        duration: const Duration(seconds: 4),
+      ));
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -378,6 +444,7 @@ class _HomePageState extends State<HomePage> {
         _clockInTime         = DateTime.now();
         _shiftElapsedSeconds = 0;
       });
+      _countdownTimer?.cancel();
       _startShiftTimer();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Shift started'), backgroundColor: Colors.green),
@@ -385,6 +452,20 @@ class _HomePageState extends State<HomePage> {
     } else if (result?['error'] == 'already_clocked_in') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('You are already clocked in'), backgroundColor: Colors.orange),
+      );
+    } else if (result?['error'] == 'no_shift_scheduled') {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('No shift scheduled for today. Contact your admin.'),
+        backgroundColor: Colors.red.shade700,
+      ));
+    } else if (result?['error'] == 'shift_not_started') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_shiftStartTime != null
+              ? 'Shift starts at ${_shiftStartTime!.hour.toString().padLeft(2, '0')}:${_shiftStartTime!.minute.toString().padLeft(2, '0')}'
+              : 'Shift has not started yet'),
+          backgroundColor: Colors.orange.shade700,
+        ),
       );
     }
   }
@@ -445,15 +526,21 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildShiftBanner() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    // Determine banner colour: amber=on shift, teal=scheduled, blue=no schedule
+    final isDark      = Theme.of(context).brightness == Brightness.dark;
     final hasSchedule = _scheduledShift != null;
+    // waiting = has schedule but not started yet (shows countdown)
+    // noShift = no schedule at all (shows lock)
+    final waiting = hasSchedule && !_isClockedIn && !_isShiftStarted;
+    final noShift = !hasSchedule && !_isClockedIn;
+
+    // Colour: amber = on shift, orange = waiting, grey = no schedule, teal = ready
     final bannerColor = _isClockedIn
         ? Colors.amber.shade700
-        : hasSchedule
-            ? Colors.teal.shade600
-            : AppCol.primary;
+        : waiting
+            ? Colors.orange.shade700
+            : noShift
+                ? Colors.grey.shade500
+                : Colors.teal.shade600;
     final bannerAlpha = isDark ? 0.25 : 0.12;
 
     return Container(
@@ -471,9 +558,11 @@ class _HomePageState extends State<HomePage> {
           Icon(
             _isClockedIn
                 ? Icons.access_time_filled
-                : hasSchedule
-                    ? Icons.event_available
-                    : Icons.login,
+                : waiting
+                    ? Icons.hourglass_top_rounded
+                    : noShift
+                        ? Icons.event_busy
+                        : Icons.event_available,
             color: bannerColor,
             size: 22,
           ),
@@ -499,6 +588,12 @@ class _HomePageState extends State<HomePage> {
                     _formatElapsed(_shiftElapsedSeconds),
                     style: TextStyle(fontSize: 12, color: Colors.amber.shade700),
                   )
+                else if (waiting)
+                  Text(
+                    'Starts in ${_formatElapsed(_secondsUntilShift)}',
+                    style: TextStyle(fontSize: 12, color: Colors.orange.shade700,
+                        fontWeight: FontWeight.w600),
+                  )
                 else if (hasSchedule && (_scheduledShift!['note'] as String?)?.isNotEmpty == true)
                   Text(
                     _scheduledShift!['note'] as String,
@@ -510,10 +605,21 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           ElevatedButton(
-            onPressed: _isClockedIn ? _onClockOut : _onClockIn,
+            // Disabled when no schedule or shift hasn't started yet
+            onPressed: _isClockedIn
+                ? _onClockOut
+                : (waiting || noShift)
+                    ? null
+                    : _onClockIn,
             style: ElevatedButton.styleFrom(
-              backgroundColor: _isClockedIn ? Colors.red : bannerColor,
+              backgroundColor: _isClockedIn
+                  ? Colors.red
+                  : (waiting || noShift)
+                      ? Colors.grey.shade400
+                      : bannerColor,
               foregroundColor: Colors.white,
+              disabledBackgroundColor: Colors.grey.shade300,
+              disabledForegroundColor: Colors.grey.shade500,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),

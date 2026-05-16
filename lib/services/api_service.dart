@@ -217,7 +217,8 @@ class ApiService {
         return json.decode(response.body) as Map<String, dynamic>;
       }
       if (response.statusCode == 409) {
-        return {'error': 'already_clocked_in'};
+        final body = json.decode(response.body) as Map<String, dynamic>;
+        return {'error': body['detail'] ?? 'conflict'};
       }
       _log('clockIn', response.statusCode, response.body);
       return null;

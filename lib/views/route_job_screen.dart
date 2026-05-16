@@ -496,6 +496,7 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
         imageName:  'bin_${stop.binId}.jpg',
         lat:        stop.lat,
         lng:        stop.lng,
+        area:       stop.area,
       );
 
       if (!mounted) return;
