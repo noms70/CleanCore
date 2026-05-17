@@ -746,14 +746,28 @@ class _HomePageState extends State<HomePage> {
         }
       }
 
-      if (workerWaste.isNotEmpty) {
+      // Wildcard waste types — "Mixed"/"All"/"Any"/"General" mean the worker
+      // collects every category. Mirrors map_page.dart so the home stat
+      // matches what's actually visible on the map.
+      const wildcardWaste = {'mixed', 'all', 'any', 'general'};
+      if (workerWaste.isNotEmpty && !wildcardWaste.contains(workerWaste)) {
         final binWaste =
             (data['wasteType'] ?? data['type'] ?? '').toString().toLowerCase();
         if (binWaste != workerWaste) return false;
       }
 
-      return fill >= 90 || status == 'critical' || status == 'full';
+      // Critical = any of: backend-classified status, admin-set "full" /
+      // "overflowing", or fill ≥ 90%. Mirrors all the strings the system
+      // actually writes to Firestore (backend uses "critical", admin Bin
+      // editor uses "full"/"overflowing").
+      const criticalStatuses = {'critical', 'full', 'overflowing'};
+      return fill >= 90 || criticalStatuses.contains(status);
     }).length;
+    debugPrint(
+      '[HomeStats] criticalBinsNearby=$critical '
+      'workerArea="$workerArea" workerWaste="$workerWaste" '
+      'totalBins=${snap.docs.length}',
+    );
     setState(() => criticalBinsNearby = critical);
   }
 
