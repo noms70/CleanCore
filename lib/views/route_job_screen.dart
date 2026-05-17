@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cc/models/models.dart';
 import 'package:cc/services/api_service.dart';
 import 'package:cc/utils/colors.dart';
+import 'package:cc/utils/area_match.dart';
 import 'package:cc/widgets/appbar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -95,15 +96,11 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
         .listen((snap) {
       if (!mounted) return;
       int count = 0;
-      final aa = _assignedArea.toLowerCase();
       for (final doc in snap.docs) {
         final data = doc.data();
         if (_assignedArea.isEmpty) { count++; continue; }
-        final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim().toLowerCase();
-        if (binArea.isEmpty) continue;
-        final aaInBa = RegExp(r'\b' + RegExp.escape(aa) + r'\b').hasMatch(binArea);
-        final baInAa = RegExp(r'\b' + RegExp.escape(binArea) + r'\b').hasMatch(aa);
-        if (binArea == aa || aaInBa || baInAa) count++;
+        // Canonical match — see utils/area_match.dart.
+        if (areaMatches(readBinArea(data), _assignedArea)) count++;
       }
       setState(() => _orphanCriticalCount = count);
     });

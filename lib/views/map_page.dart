@@ -11,6 +11,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 
 import 'package:cc/utils/colors.dart';
+import 'package:cc/utils/area_match.dart';
 import '../models/models.dart';
 import '../widgets/navbar.dart';
 import './route_job_screen.dart';
@@ -247,21 +248,9 @@ class _MapPageState extends State<MapPage> {
       }
 
       if (_assignedArea.isNotEmpty) {
-        final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
-        // Assigned workers only see bins that match their area. Bins with no
-        // area set are rejected too — admins must tag each bin with an area.
-        if (binArea.isEmpty) {
-          debugPrint('[MapPage] reject ${d.id}: bin has no area (worker assigned "$_assignedArea")');
-          return false;
-        }
-        final ba = binArea.toLowerCase();
-        final aa = _assignedArea.toLowerCase();
-        // Word-boundary match. Equal, or either string contains the other
-        // as a whole word — so worker "F-7" matches bin "Islamabad F-7",
-        // but worker "Wah" does NOT match bin "Wahdat Colony".
-        final aaInBa = RegExp(r'\b' + RegExp.escape(aa) + r'\b').hasMatch(ba);
-        final baInAa = RegExp(r'\b' + RegExp.escape(ba) + r'\b').hasMatch(aa);
-        if (!(ba == aa || aaInBa || baInAa)) {
+        // Single source of truth for area matching — see utils/area_match.dart.
+        final binArea = readBinArea(data);
+        if (!areaMatches(binArea, _assignedArea)) {
           debugPrint('[MapPage] reject ${d.id}: area "$binArea" != worker "$_assignedArea"');
           return false;
         }

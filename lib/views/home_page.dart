@@ -11,6 +11,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cc/utils/colors.dart';
+import 'package:cc/utils/area_match.dart';
 import '../models/models.dart';
 import '../widgets/navbar.dart';
 import './map_page.dart';
@@ -690,50 +691,70 @@ class _HomePageState extends State<HomePage> {
 
   static const double _proximityRadiusM = 10000; // must match map_page
 
+  // Cache the last snapshot so we can recount once _user finishes loading
+  // (the user doc is fetched async — without this, the first count fires
+  // before assignedArea is known and the stat stays wrong until a bin changes).
+  QuerySnapshot<Map<String, dynamic>>? _lastBinsSnapshot;
+
+  /// Re-runs the critical-bin count using the current _user assignment.
+  /// Safe to call any time _user changes.
+  void _recountCriticalBins() {
+    final snap = _lastBinsSnapshot;
+    if (snap == null || !mounted) return;
+    _applyCriticalBinsCount(snap);
+  }
+
   /// Count critical bins visible to this worker (area-scoped or proximity-based).
   void _subscribeToBinStats() {
     _binsSub = _db.collection('bins').snapshots().listen((snap) {
       if (!mounted) return;
-      final workerArea  = _user?.assignedArea ?? '';
-      final workerWaste = (_user?.assignedWasteType ?? '').toLowerCase();
-      final userLat     = _user?.lat ?? 0.0;
-      final userLng     = _user?.lng ?? 0.0;
-
-      final critical = snap.docs.where((d) {
-        final data   = d.data();
-        final fill   = (data['fillLevel'] ?? data['fill_level'] ?? 0) as num;
-        final status = (data['status'] ?? '').toString().toLowerCase();
-
-        if (workerArea.isNotEmpty) {
-          final binArea = (data['area'] ?? data['sector'] ?? '').toString();
-          if (binArea != workerArea) return false;
-        } else if (userLat != 0.0 && userLng != 0.0) {
-          // No area assigned — fall back to proximity using stored coordinates.
-          final binLat = (data['lat'] as num?)?.toDouble()
-              ?? (data['location'] is GeoPoint
-                  ? (data['location'] as GeoPoint).latitude
-                  : null);
-          final binLng = (data['lng'] as num?)?.toDouble()
-              ?? (data['location'] is GeoPoint
-                  ? (data['location'] as GeoPoint).longitude
-                  : null);
-          if (binLat != null && binLng != null) {
-            final distM = Geolocator.distanceBetween(
-                userLat, userLng, binLat, binLng);
-            if (distM > _proximityRadiusM) return false;
-          }
-        }
-
-        if (workerWaste.isNotEmpty) {
-          final binWaste =
-              (data['wasteType'] ?? data['type'] ?? '').toString().toLowerCase();
-          if (binWaste != workerWaste) return false;
-        }
-
-        return fill >= 90 || status == 'critical' || status == 'full';
-      }).length;
-      setState(() => criticalBinsNearby = critical);
+      _lastBinsSnapshot = snap;
+      _applyCriticalBinsCount(snap);
     });
+  }
+
+  void _applyCriticalBinsCount(QuerySnapshot<Map<String, dynamic>> snap) {
+    final workerArea  = _user?.assignedArea ?? '';
+    final workerWaste = (_user?.assignedWasteType ?? '').toLowerCase();
+    final userLat     = _user?.lat ?? 0.0;
+    final userLng     = _user?.lng ?? 0.0;
+
+    final critical = snap.docs.where((d) {
+      final data   = d.data();
+      final fill   = (data['fillLevel'] ?? data['fill_level'] ?? 0) as num;
+      final status = (data['status'] ?? '').toString().toLowerCase();
+
+      if (workerArea.isNotEmpty) {
+        // Canonical match — see utils/area_match.dart. Rejects bins with
+        // no area set, and handles case/whitespace/hierarchy uniformly.
+        final binArea = readBinArea(data);
+        if (!areaMatches(binArea, workerArea)) return false;
+      } else if (userLat != 0.0 && userLng != 0.0) {
+        // No area assigned — fall back to proximity using stored coordinates.
+        final binLat = (data['lat'] as num?)?.toDouble()
+            ?? (data['location'] is GeoPoint
+                ? (data['location'] as GeoPoint).latitude
+                : null);
+        final binLng = (data['lng'] as num?)?.toDouble()
+            ?? (data['location'] is GeoPoint
+                ? (data['location'] as GeoPoint).longitude
+                : null);
+        if (binLat != null && binLng != null) {
+          final distM = Geolocator.distanceBetween(
+              userLat, userLng, binLat, binLng);
+          if (distM > _proximityRadiusM) return false;
+        }
+      }
+
+      if (workerWaste.isNotEmpty) {
+        final binWaste =
+            (data['wasteType'] ?? data['type'] ?? '').toString().toLowerCase();
+        if (binWaste != workerWaste) return false;
+      }
+
+      return fill >= 90 || status == 'critical' || status == 'full';
+    }).length;
+    setState(() => criticalBinsNearby = critical);
   }
 
   void _initializeUserData() async {
@@ -746,6 +767,10 @@ class _HomePageState extends State<HomePage> {
           _isLoadingUserData = false;
           _updateGreeting();
         });
+        // The bin-stats subscription starts in initState before the user
+        // doc has loaded, so the first snapshot's count is computed with
+        // assignedArea = ''. Recount now that we know the worker's area.
+        _recountCriticalBins();
       }
     }
   }
