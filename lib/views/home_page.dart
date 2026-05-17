@@ -269,6 +269,11 @@ class _HomePageState extends State<HomePage> {
   // Firestore subscriptions
   StreamSubscription<QuerySnapshot>? _routeSub;
   StreamSubscription<QuerySnapshot>? _binsSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _settingsSub;
+
+  // Live thresholds from settings/main — kept in sync with map_page so the
+  // Critical Bins tile recounts the moment admin moves the slider.
+  int _criticalThreshold = 90;
 
   // Bins are loaded live from Firestore inside MapPage — no hardcoded data here.
   final List<BinLocation> binLocations = [];
@@ -290,15 +295,35 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _initializeUserData();
     _subscribeToRouteData();
+    _subscribeToSettings();
     _subscribeToBinStats();
     _loadShiftStatus();
     _subscribeToSchedule();
+  }
+
+  // Live admin thresholds — keeps the Critical Bins count consistent with
+  // the map markers (both read settings/main, see map_page.dart).
+  void _subscribeToSettings() {
+    _settingsSub = _db
+        .collection('settings')
+        .doc('main')
+        .snapshots()
+        .listen((snap) {
+      if (!mounted || !snap.exists) return;
+      final data = snap.data() ?? const <String, dynamic>{};
+      final newCritical = (data['criticalThreshold'] as num?)?.toInt() ?? 90;
+      if (newCritical != _criticalThreshold) {
+        _criticalThreshold = newCritical;
+        _recountCriticalBins();
+      }
+    });
   }
 
   @override
   void dispose() {
     _routeSub?.cancel();
     _binsSub?.cancel();
+    _settingsSub?.cancel();
     _shiftTimer?.cancel();
     _scheduleSub?.cancel();
     _countdownTimer?.cancel();
@@ -756,12 +781,13 @@ class _HomePageState extends State<HomePage> {
         if (binWaste != workerWaste) return false;
       }
 
-      // Critical = any of: backend-classified status, admin-set "full" /
-      // "overflowing", or fill ≥ 90%. Mirrors all the strings the system
-      // actually writes to Firestore (backend uses "critical", admin Bin
-      // editor uses "full"/"overflowing").
+      // Critical = fill exceeds the LIVE admin threshold (settings/main) OR
+      // backend/admin already tagged the status as critical/full/overflowing.
+      // Using the live threshold makes the count update instantly when the
+      // admin slides the threshold lower — no need to wait for the backend
+      // to finish its batch reclassification.
       const criticalStatuses = {'critical', 'full', 'overflowing'};
-      return fill >= 90 || criticalStatuses.contains(status);
+      return fill >= _criticalThreshold || criticalStatuses.contains(status);
     }).length;
     debugPrint(
       '[HomeStats] criticalBinsNearby=$critical '

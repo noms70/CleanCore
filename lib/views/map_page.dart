@@ -77,6 +77,21 @@ class _MapPageState extends State<MapPage> {
   StreamSubscription<QuerySnapshot>? _binsSub;
   StreamSubscription<QuerySnapshot>? _routeSub;
   StreamSubscription<Position>? _locationSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _settingsSub;
+
+  // Live thresholds from settings/main — keep markers and "ready for pickup"
+  // alerts honest even before the backend's batch reclassification finishes.
+  // Defaults match the backend's _get_thresholds() fallback (70/90).
+  int _warningThreshold  = 70;
+  int _criticalThreshold = 90;
+  bool _thresholdsLoaded = false;
+
+  // Bin IDs that were critical at the last snapshot — used to detect "newly
+  // critical" transitions and show an in-app pickup alert. Seeded on first
+  // snapshot so we don't blast the worker with alerts for bins that were
+  // already critical when they opened the app.
+  Set<String> _previouslyCriticalIds = {};
+  bool _firstSnapshotSeen = false;
 
   // â”€â”€ Location â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Position? _currentPosition;
@@ -89,6 +104,7 @@ class _MapPageState extends State<MapPage> {
     _polylinePoints = PolylinePoints(apiKey: '');
     _bins = List.from(widget.binLocations);
     _setupMap();
+    _subscribeToSettings();            // live warning/critical thresholds
     _loadProfileThenSubscribeToBins(); // loads assignment filters first
     _subscribeToActiveRoute();
   }
@@ -98,8 +114,46 @@ class _MapPageState extends State<MapPage> {
     _binsSub?.cancel();
     _routeSub?.cancel();
     _locationSub?.cancel();
+    _settingsSub?.cancel();
     _mapController?.dispose();
     super.dispose();
+  }
+
+  // Live settings/main subscription — admin slider changes propagate here
+  // within ~50 ms and trigger a marker re-color + alert sweep so the worker
+  // sees the new severity without waiting for the next bin update.
+  void _subscribeToSettings() {
+    _settingsSub = _db
+        .collection('settings')
+        .doc('main')
+        .snapshots()
+        .listen((snap) {
+      if (!mounted || !snap.exists) return;
+      final data = snap.data() ?? const <String, dynamic>{};
+      final newWarning  = (data['warningThreshold']  as num?)?.toInt() ?? 70;
+      final newCritical = (data['criticalThreshold'] as num?)?.toInt() ?? 90;
+      final changed = !_thresholdsLoaded
+          || newWarning  != _warningThreshold
+          || newCritical != _criticalThreshold;
+      _warningThreshold  = newWarning;
+      _criticalThreshold = newCritical;
+      _thresholdsLoaded  = true;
+      debugPrint('[MapPage] thresholds updated: warning=$_warningThreshold critical=$_criticalThreshold');
+      // Re-evaluate bins so markers re-color immediately. The first load
+      // here just primes the state — no alerts yet because _firstSnapshotSeen
+      // is still false until the bins listener has fired at least once.
+      if (changed && _rawBinDocs.isNotEmpty) _applyBinFilter();
+    });
+  }
+
+  // Live critical check — uses current threshold instead of the model's
+  // hardcoded 90 % so admin slider changes take effect instantly. Backend
+  // also writes status='critical' after recompute, so either signal flips
+  // the bin red.
+  bool _isCriticalNow(BinLocation bin) {
+    if (bin.fullness >= _criticalThreshold) return true;
+    final s = bin.status.toLowerCase();
+    return s == 'critical' || s == 'full' || s == 'overflowing';
   }
 
   // â”€â”€ Setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -169,7 +223,51 @@ class _MapPageState extends State<MapPage> {
       });
       _fitCameraToBins();
       _fetchBinNamesForNewBins(filtered);
+      _sweepNewlyCriticalAlerts(filtered);
     }
+  }
+
+  // Fires a snackbar for each bin that transitioned to critical since the
+  // last filter pass. Skipped on the very first snapshot (workers shouldn't
+  // be spammed with alerts for bins that were already red when they opened
+  // the app) — those just seed _previouslyCriticalIds.
+  void _sweepNewlyCriticalAlerts(List<BinLocation> bins) {
+    final currentIds = bins.where(_isCriticalNow).map((b) => b.id).toSet();
+    if (!_firstSnapshotSeen) {
+      _previouslyCriticalIds = currentIds;
+      _firstSnapshotSeen = true;
+      return;
+    }
+    final newlyCritical = currentIds.difference(_previouslyCriticalIds);
+    _previouslyCriticalIds = currentIds;
+    for (final id in newlyCritical) {
+      final bin = bins.firstWhere((b) => b.id == id);
+      _showReadyForPickupAlert(bin);
+    }
+  }
+
+  void _showReadyForPickupAlert(BinLocation bin) {
+    if (!mounted) return;
+    final areaLabel = bin.area.isNotEmpty ? bin.area : 'your area';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Bin in $areaLabel is now ${bin.fullness}% full — ready for pickup',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.red.shade700,
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   // Animates the map camera so every visible bin (and the worker, if known)
@@ -440,9 +538,12 @@ class _MapPageState extends State<MapPage> {
   void _generateMarkers() {
     final markers = <Marker>{};
     for (final bin in _bins) {
-      final hue = bin.isCritical
+      // Severity uses live thresholds (settings/main) — so when admin slides
+      // the critical threshold from 90 → 40, a 55 % bin flips from green to
+      // red immediately without waiting for the backend's status rewrite.
+      final hue = _isCriticalNow(bin)
           ? BitmapDescriptor.hueRed
-          : bin.fullness > 70
+          : bin.fullness >= _warningThreshold
               ? BitmapDescriptor.hueYellow
               : BitmapDescriptor.hueGreen;
       markers.add(Marker(
