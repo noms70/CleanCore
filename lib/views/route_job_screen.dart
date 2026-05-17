@@ -9,7 +9,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Displays the worker's current active route as an ordered job list.
@@ -40,28 +39,74 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
   final Set<String> _busyBins = {};
   final Set<String> _skippingBins = {};
 
-  // AI scan state per stop
-  final Map<String, Map<String, dynamic>> _scanResults = {};
-  final Set<String> _scanningBins = {};
-
   bool _generating = false;
   String? _genError;
 
+  // Worker's assigned area — needed to filter orphan critical bins to this
+  // worker's district. Loaded once from users/{uid}.
+  String _assignedArea = '';
+
+  // Count of bins with status=='critical' AND isLocked==false in the worker's
+  // area. These are bins waiting to be picked up by a /optimize-route call.
+  int _orphanCriticalCount = 0;
+
   StreamSubscription<QuerySnapshot>? _routeSub;
   StreamSubscription<QuerySnapshot>? _completedRouteSub;
+  StreamSubscription<QuerySnapshot>? _orphanBinsSub;
 
   @override
   void initState() {
     super.initState();
     _subscribeToRoute();
     _subscribeToCompletedRoute();
+    _loadAssignedAreaThenSubscribeOrphans();
   }
 
   @override
   void dispose() {
     _routeSub?.cancel();
     _completedRouteSub?.cancel();
+    _orphanBinsSub?.cancel();
     super.dispose();
+  }
+
+  // ── Orphan critical bins (area-filtered) ──────────────────────────────────
+  // Shows the worker how many critical bins are waiting for the next route.
+  // Mirrors the area-hierarchy match used elsewhere in the app.
+  Future<void> _loadAssignedAreaThenSubscribeOrphans() async {
+    if (_uid == null) return;
+    try {
+      final doc = await _db.collection('users').doc(_uid!).get();
+      if (doc.exists) {
+        _assignedArea = (doc.data()?['assignedArea'] as String? ?? '').trim();
+      }
+    } catch (_) {
+      // Worker doc unreachable — fall through with empty area filter.
+    }
+    _subscribeToOrphanBins();
+  }
+
+  void _subscribeToOrphanBins() {
+    _orphanBinsSub = _db
+        .collection('bins')
+        .where('status', isEqualTo: 'critical')
+        .where('isLocked', isEqualTo: false)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      int count = 0;
+      final aa = _assignedArea.toLowerCase();
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        if (_assignedArea.isEmpty) { count++; continue; }
+        final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim().toLowerCase();
+        if (binArea.isEmpty) continue;
+        final aaInBa = RegExp(r'\b' + RegExp.escape(aa) + r'\b').hasMatch(binArea);
+        final baInAa = RegExp(r'\b' + RegExp.escape(binArea) + r'\b').hasMatch(aa);
+        if (binArea == aa || aaInBa || baInAa) count++;
+      }
+      setState(() => _orphanCriticalCount = count);
+    });
   }
 
   void _subscribeToRoute() {
@@ -82,8 +127,30 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
         setState(() { _route = null; _loading = false; _error = null; });
         return;
       }
+      final newRoute = ActiveRoute.fromFirestore(snap.docs.first);
+
+      // Detect backend-driven stop append (urgent critical bin auto-attached
+      // by /analyze/). Surface as a passive snackbar — no banner, no button.
+      if (_route != null && _route!.routeId == newRoute.routeId) {
+        final oldIds = _route!.stops.map((s) => s.binId).toSet();
+        final addedStops = newRoute.stops.where((s) => !oldIds.contains(s.binId)).toList();
+        for (final added in addedStops) {
+          final areaLabel = added.area.isNotEmpty ? added.area : 'your area';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Route updated — urgent bin in $areaLabel '
+                '(${added.fillLevel}% full) added automatically.',
+              ),
+              backgroundColor: Colors.red.shade700,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
+
       setState(() {
-        _route   = ActiveRoute.fromFirestore(snap.docs.first);
+        _route   = newRoute;
         _loading = false;
         _error   = null;
       });
@@ -434,94 +501,6 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
     }
   }
 
-  Future<ImageSource?> _pickImageSource() {
-    return showModalBottomSheet<ImageSource>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 40, height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Select Image Source',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 4),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_rounded),
-              title: const Text('Take Photo'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_rounded),
-              title: const Text('Choose from Gallery'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _scanBin(RouteStop stop) async {
-    if (_scanningBins.contains(stop.binId)) return;
-    try {
-      final source = await _pickImageSource();
-      if (source == null || !mounted) return;
-
-      final photo = await ImagePicker().pickImage(
-        source: source,
-        imageQuality: 80,
-        maxWidth: 1024,
-      );
-      if (photo == null || !mounted) return;
-
-      setState(() => _scanningBins.add(stop.binId));
-
-      final bytes  = await photo.readAsBytes();
-      final result = await _api.analyzeBin(
-        imageBytes: bytes,
-        imageName:  'bin_${stop.binId}.jpg',
-        lat:        stop.lat,
-        lng:        stop.lng,
-        area:       stop.area,
-      );
-
-      if (!mounted) return;
-      setState(() {
-        _scanningBins.remove(stop.binId);
-        if (result != null) _scanResults[stop.binId] = result;
-      });
-
-      if (result == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('AI scan failed. Check connection and try again.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _scanningBins.remove(stop.binId));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Camera error: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-
   void _showCompletionSummary() {
     if (_route == null || !mounted) return;
     final route = _route!;
@@ -595,79 +574,6 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
           Text(label, style: const TextStyle(fontSize: 13, color: Colors.grey)),
           const Spacer(),
           Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScanResult(String binId) {
-    final result = _scanResults[binId];
-    if (result == null) return const SizedBox.shrink();
-
-    final results    = (result['results'] as Map<String, dynamic>?) ?? {};
-    final fillLevel  = (results['fill_level'] as Map<String, dynamic>?) ?? {};
-    final fillValue  = fillLevel['value'] as int? ?? 0;
-    final fillStatus = fillLevel['status'] as String? ?? 'Unknown';
-    final confidence = ((fillLevel['confidence'] as num?) ?? 0).toDouble();
-
-    final wasteDetected = results['waste_detected'] as List<dynamic>? ?? [];
-    final primaryWaste  = wasteDetected.isNotEmpty
-        ? ((wasteDetected.first as Map<String, dynamic>)['type'] as String? ?? 'Unknown')
-        : 'Unknown';
-
-    final fillColor = fillValue >= 90 ? Colors.red
-        : fillValue >= 70 ? Colors.orange
-        : Colors.green;
-
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.teal.shade50,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.teal.shade200),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.smart_toy_outlined, size: 13, color: Colors.teal.shade700),
-              const SizedBox(width: 4),
-              Text('AI Scan',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700)),
-              const Spacer(),
-              Text('${(confidence * 100).toStringAsFixed(0)}% confidence',
-                style: TextStyle(fontSize: 11, color: Colors.teal.shade600)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: fillColor.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: fillColor.withOpacity(0.4)),
-                ),
-                child: Text('$fillStatus · $fillValue%',
-                  style: TextStyle(fontSize: 11, color: fillColor, fontWeight: FontWeight.bold)),
-              ),
-              if (primaryWaste != 'Unknown') ...[
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue.shade200),
-                  ),
-                  child: Text(primaryWaste,
-                    style: TextStyle(fontSize: 11, color: Colors.blue.shade700)),
-                ),
-              ],
-            ],
-          ),
         ],
       ),
     );
@@ -747,6 +653,7 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
           ),
+          _orphanChip(),
           const SizedBox(height: 28),
 
           // Summary stats card
@@ -855,6 +762,41 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
     );
   }
 
+  // Soft hint chip: shown only when there are orphan critical bins waiting.
+  // The user picks them up by tapping the generate/check button below.
+  Widget _orphanChip() {
+    if (_orphanCriticalCount <= 0) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final areaLabel = _assignedArea.isNotEmpty ? _assignedArea : 'your area';
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.red.shade900.withOpacity(0.3) : Colors.red.shade50,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.red.shade300),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red.shade700),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              '$_orphanCriticalCount urgent bin${_orphanCriticalCount == 1 ? '' : 's'} '
+              'in $areaLabel waiting for a route',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.red.shade700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildNoRoute() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Center(
@@ -877,6 +819,7 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
             ),
+            _orphanChip(),
             if (_genError != null) ...[
               const SizedBox(height: 12),
               Container(
@@ -1139,12 +1082,6 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
               ),
             ),
 
-            // AI scan result (shown after a successful scan)
-            if (_scanResults.containsKey(stop.binId)) ...[
-              const SizedBox(height: 10),
-              _buildScanResult(stop.binId),
-            ],
-
             // Status badge — collected or skipped
             if (isDone || isSkipped) ...[
               const SizedBox(height: 10),
@@ -1231,34 +1168,6 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
                         side: BorderSide(color: Colors.orange.withOpacity(0.6)),
                         padding: const EdgeInsets.symmetric(vertical: 9),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    // Scan with AI
-                    OutlinedButton.icon(
-                      onPressed: _scanningBins.contains(stop.binId)
-                          ? null
-                          : () => _scanBin(stop),
-                      icon: _scanningBins.contains(stop.binId)
-                          ? const SizedBox(
-                              width: 13, height: 13,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: AppCol.btnbacks))
-                          : const Icon(Icons.smart_toy_outlined,
-                              size: 15, color: AppCol.btnbacks),
-                      label: Text(
-                        _scanningBins.contains(stop.binId)
-                            ? 'Scanning…'
-                            : 'Scan with AI',
-                        style: const TextStyle(
-                            fontSize: 12, color: AppCol.btnbacks),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppCol.btnbacks,
-                        side: const BorderSide(color: AppCol.btnbacks),
-                        padding: const EdgeInsets.symmetric(vertical: 9),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
                   ],

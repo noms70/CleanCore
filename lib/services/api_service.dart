@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
@@ -26,90 +25,6 @@ class ApiService {
   static const Map<String, String> _baseHeaders = {
     'ngrok-skip-browser-warning': 'true',
   };
-
-  // ── 1. Analyze bin image ──────────────────────────────────────────────────
-  // Field name MUST be "image_file" — matches FastAPI's parameter name exactly.
-  // binId: if given, backend UPDATES that existing doc (preserves isLocked/routeId).
-  // area:  worker's assignedArea, so scanned bins stay in the right routing pool.
-  Future<Map<String, dynamic>?> analyzeBin({
-    List<int>? imageBytes,
-    String? imageName,
-    File? imageFile,    // legacy mobile-only param
-    String? binId,      // existing Firestore bin ID to update (not create)
-    String? area,       // worker's assignedArea
-    required double lat,
-    required double lng,
-  }) async {
-    try {
-      final params = <String, String>{
-        'lat': lat.toString(),
-        'lng': lng.toString(),
-        if (binId != null && binId.isNotEmpty) 'bin_id': binId,
-        if (area != null && area.isNotEmpty) 'area': area,
-      };
-      final uri = Uri.parse('$_base/analyze/').replace(queryParameters: params);
-
-      final request = http.MultipartRequest('POST', uri)
-        ..headers.addAll(_baseHeaders);
-
-      if (imageBytes != null) {
-        // Works on both web and mobile
-        request.files.add(http.MultipartFile.fromBytes(
-          'image_file',
-          imageBytes,
-          filename: imageName ?? 'capture.jpg',
-        ));
-      } else if (!kIsWeb && imageFile != null) {
-        // Mobile-only fallback
-        request.files.add(
-          await http.MultipartFile.fromPath('image_file', imageFile.path),
-        );
-      } else {
-        _log('analyzeBin', 0, 'No image provided');
-        return null;
-      }
-
-      final streamed = await request.send();
-      final response = await http.Response.fromStream(streamed);
-
-      if (response.statusCode == 200) {
-        return json.decode(response.body) as Map<String, dynamic>;
-      }
-      _log('analyzeBin', response.statusCode, response.body);
-      return null;
-    } catch (e) {
-      _log('analyzeBin', 0, e.toString());
-      return null;
-    }
-  }
-
-  // ── 1b. Re-scan an existing bin (updates fill/waste/image, preserves lat/lng/area) ──
-  Future<Map<String, dynamic>?> rescanBin({
-    required String binId,
-    required List<int> imageBytes,
-    String imageName = 'capture.jpg',
-  }) async {
-    try {
-      final uri = Uri.parse('$_base/rescan-bin/$binId');
-      final request = http.MultipartRequest('POST', uri)
-        ..headers.addAll(_baseHeaders)
-        ..files.add(http.MultipartFile.fromBytes(
-          'image_file',
-          imageBytes,
-          filename: imageName,
-        ));
-      final streamed = await request.send();
-      final response = await http.Response.fromStream(streamed);
-      if (response.statusCode == 200) {
-        return json.decode(response.body) as Map<String, dynamic>;
-      }
-      _log('rescanBin', response.statusCode, response.body);
-      return null;
-    } catch (e) {
-      _log('rescanBin', 0, e.toString());
-      return null;
-    }
-  }
 
   // ── 2. Update driver GPS ──────────────────────────────────────────────────
   // Field name: driver_id (NOT worker_id). Backend merges lat/lng into the

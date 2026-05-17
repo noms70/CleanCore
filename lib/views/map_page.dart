@@ -1,6 +1,5 @@
 ﻿import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:cc/services/api_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,7 +9,6 @@ import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
 
 import 'package:cc/utils/colors.dart';
 import '../models/models.dart';
@@ -62,13 +60,9 @@ class _MapPageState extends State<MapPage> {
   String _assignedWasteType = '';
 
   // â”€â”€ Active route (live from Firestore 'routes' collection) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Urgent critical bins are auto-attached server-side by /analyze/ and surface
+  // here as new stops in _subscribeToActiveRoute (passive toast, no banner).
   ActiveRoute? _activeRoute;
-
-  // â”€â”€ Urgent bin alert â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Tracks bins we've already shown an alert for (prevents repeat alerts)
-  final Set<String> _notifiedUrgentBins = {};
-  BinLocation? _urgentAlertBin; // currently shown alert, null = no alert
-  bool _reoptimizing = false;
 
   // â”€â”€ Reverse-geocoded display names for bin tiles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   final Map<String, String> _binLocationNames = {};
@@ -81,17 +75,12 @@ class _MapPageState extends State<MapPage> {
   // â”€â”€ Subscriptions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   StreamSubscription<QuerySnapshot>? _binsSub;
   StreamSubscription<QuerySnapshot>? _routeSub;
-  StreamSubscription<QuerySnapshot>? _urgentSub;
   StreamSubscription<Position>? _locationSub;
 
   // â”€â”€ Location â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Position? _currentPosition;
 
   late PolylinePoints _polylinePoints;
-
-  // â”€â”€ Image picker (for bin scan) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  final _picker = ImagePicker();
-  bool _scanning = false;
 
   @override
   void initState() {
@@ -101,14 +90,12 @@ class _MapPageState extends State<MapPage> {
     _setupMap();
     _loadProfileThenSubscribeToBins(); // loads assignment filters first
     _subscribeToActiveRoute();
-    _subscribeToUrgentBins();
   }
 
   @override
   void dispose() {
     _binsSub?.cancel();
     _routeSub?.cancel();
-    _urgentSub?.cancel();
     _locationSub?.cancel();
     _mapController?.dispose();
     super.dispose();
@@ -330,6 +317,9 @@ class _MapPageState extends State<MapPage> {
 
   // â”€â”€ Firestore: active route for this driver â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Backend writes driverId (not workerId). Query must match exactly.
+  // We also keep track of which bin IDs were on the route last snapshot, so a
+  // bin appended by the backend (urgent critical bin auto-attached in
+  // /analyze/) surfaces as a passive toast — no banner, no button.
   void _subscribeToActiveRoute() {
     if (_uid == null) return;
     _routeSub = _db
@@ -340,10 +330,32 @@ class _MapPageState extends State<MapPage> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
+      final newRoute = snap.docs.isNotEmpty
+          ? ActiveRoute.fromFirestore(snap.docs.first)
+          : null;
+
+      // Diff the bin IDs to detect a backend-driven append.
+      if (newRoute != null && _activeRoute != null &&
+          newRoute.routeId == _activeRoute!.routeId) {
+        final oldIds = _activeRoute!.stops.map((s) => s.binId).toSet();
+        final addedStops = newRoute.stops.where((s) => !oldIds.contains(s.binId)).toList();
+        for (final added in addedStops) {
+          final areaLabel = added.area.isNotEmpty ? added.area : 'your area';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Route updated — urgent bin in $areaLabel '
+                '(${added.fillLevel}% full) added automatically.',
+              ),
+              backgroundColor: Colors.red.shade700,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
+
       setState(() {
-        _activeRoute = snap.docs.isNotEmpty
-            ? ActiveRoute.fromFirestore(snap.docs.first)
-            : null;
+        _activeRoute = newRoute;
         if (_activeRoute == null) _polylines.clear();
       });
       if (_activeRoute != null) _fetchAndDrawRoutePolyline();
@@ -405,121 +417,6 @@ class _MapPageState extends State<MapPage> {
         ),
       };
     });
-  }
-
-  // â”€â”€ Urgent bin real-time alert â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Listens for bins with fillLevel >= 90 that are not yet locked to a route.
-  // When a new one appears in the worker's area, shows an alert banner.
-  void _subscribeToUrgentBins() {
-    if (_uid == null) return;
-    _urgentSub = _db
-        .collection('bins')
-        .where('fillLevel', isGreaterThanOrEqualTo: 90)
-        .where('isLocked', isEqualTo: false)
-        .snapshots()
-        .listen((snap) {
-      if (!mounted) return;
-      for (final doc in snap.docChanges) {
-        // Only react to newly added or modified-to-urgent bins
-        if (doc.type == DocumentChangeType.added ||
-            doc.type == DocumentChangeType.modified) {
-          final binId = doc.doc.id;
-          if (_notifiedUrgentBins.contains(binId)) continue;
-
-          final data = doc.doc.data() as Map<String, dynamic>;
-          final binArea = (data['area'] ?? data['sector'] ?? '').toString().trim();
-          if (_assignedArea.isNotEmpty) {
-            if (binArea.isEmpty) continue;
-            final ba = binArea.toLowerCase();
-            final aa = _assignedArea.toLowerCase();
-            final aaInBa = RegExp(r'\b' + RegExp.escape(aa) + r'\b').hasMatch(ba);
-            final baInAa = RegExp(r'\b' + RegExp.escape(ba) + r'\b').hasMatch(aa);
-            if (!(ba == aa || aaInBa || baInAa)) continue;
-          } else if (_currentPosition != null) {
-            final binLat = _getBinLat(data);
-            final binLng = _getBinLng(data);
-            if (binLat != null && binLng != null) {
-              final distM = Geolocator.distanceBetween(
-                _currentPosition!.latitude, _currentPosition!.longitude,
-                binLat, binLng,
-              );
-              if (distM > _proximityRadiusM) continue;
-            }
-          }
-
-          _notifiedUrgentBins.add(binId);
-          final urgent = BinLocation.fromFirestore(doc.doc);
-          setState(() => _urgentAlertBin = urgent);
-          // Auto-dismiss after 10 seconds
-          Future.delayed(const Duration(seconds: 10), () {
-            if (mounted && _urgentAlertBin?.id == binId) {
-              setState(() => _urgentAlertBin = null);
-            }
-          });
-          break; // show one at a time
-        }
-      }
-    });
-  }
-
-  // â”€â”€ Insert an urgent bin as the next stop in the existing active route â”€â”€â”€â”€â”€
-  // Does NOT call optimizeRoute() â€” that would replace the whole route because
-  // the original bins are isLocked=true and the backend ignores them.
-  Future<void> _addBinToRoute(BinLocation bin) async {
-    final route = _activeRoute;
-    if (route == null || _uid == null) return;
-
-    setState(() { _reoptimizing = true; _urgentAlertBin = null; });
-
-    try {
-      // Serialize current stops back to maps (preserving completed flags)
-      final updatedStops = route.stops.map((s) => <String, dynamic>{
-        'binId':     s.binId,
-        'lat':       s.lat,
-        'lng':       s.lng,
-        'fillLevel': s.fillLevel,
-        'wasteType': s.wasteType,
-        'area':      s.area,
-        'completed': s.completed,
-      }).toList();
-
-      // Guard: don't add if already present
-      if (updatedStops.any((s) => s['binId'] == bin.id)) {
-        if (mounted) setState(() => _reoptimizing = false);
-        return;
-      }
-
-      final newStop = <String, dynamic>{
-        'binId':     bin.id,
-        'lat':       bin.lat,
-        'lng':       bin.lng,
-        'fillLevel': bin.fullness,
-        'wasteType': bin.wasteType,
-        'area':      bin.area,
-        'completed': false,
-      };
-
-      // Insert right before the first pending stop so it becomes the next pickup
-      final firstPendingIdx = updatedStops.indexWhere((s) => s['completed'] == false);
-      if (firstPendingIdx >= 0) {
-        updatedStops.insert(firstPendingIdx, newStop);
-      } else {
-        updatedStops.add(newStop);
-      }
-
-      // Patch the route document â€” _subscribeToActiveRoute will redraw the polyline
-      await _db.collection('routes').doc(route.routeId).update({
-        'stops':      updatedStops,
-        'totalStops': route.totalStops + 1,
-      });
-
-      // Lock the bin so other routes don't claim it
-      await _db.collection('bins').doc(bin.id).update({'isLocked': true});
-    } catch (_) {
-      // Firestore write failed â€” route is unchanged, no action needed
-    }
-
-    if (mounted) setState(() => _reoptimizing = false);
   }
 
   // â”€â”€ GPS: stream location and push to backend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -731,7 +628,7 @@ class _MapPageState extends State<MapPage> {
                 height: 100,
                 child: Center(
                   child: Text(
-                    'No image available.\nScan this bin with AI to capture one.',
+                    'No image available.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.grey, fontSize: 13),
                   ),
@@ -755,90 +652,6 @@ class _MapPageState extends State<MapPage> {
         ],
       ),
     );
-  }
-
-  // â”€â”€ Image source picker (camera or gallery) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  Future<ImageSource?> _pickImageSource() {
-    return showModalBottomSheet<ImageSource>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 40, height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Select Image Source',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 4),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_rounded),
-              title: const Text('Take Photo'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_rounded),
-              title: const Text('Choose from Gallery'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // â”€â”€ Scan bin with AI â†’ POST /analyze/ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  Future<void> _scanBin(BinLocation bin) async {
-    final source = await _pickImageSource();
-    if (source == null || !mounted) return;
-
-    final picked = await _picker.pickImage(source: source, imageQuality: 85);
-    if (picked == null || !mounted) return;
-
-    setState(() => _scanning = true);
-    Navigator.pop(context); // close bottom sheet while scanning
-
-    // Read image bytes (works on both web and mobile)
-    final bytes = await picked.readAsBytes();
-
-    final result = await _api.rescanBin(
-      binId:      bin.id,
-      imageBytes: bytes,
-      imageName:  picked.name,
-    );
-
-    if (!mounted) return;
-    setState(() => _scanning = false);
-
-    if (result != null) {
-      final fill  = result['fillLevel'] ?? 0;
-      final waste = result['wasteType'] ?? 'â€”';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Scanned: $fill% full Â· $waste'),
-          backgroundColor: Colors.teal,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Scan failed. Is the backend running?'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
   }
 
   // â”€â”€ Report anomaly with type picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -940,7 +753,6 @@ class _MapPageState extends State<MapPage> {
   }
 
   Widget _buildBinSheet(BinLocation bin) {
-    final bool isBusy = _scanning;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
@@ -1053,10 +865,7 @@ class _MapPageState extends State<MapPage> {
             const SizedBox(height: 20),
 
             // Action buttons
-            if (isBusy)
-              const Center(child: CircularProgressIndicator(color: AppCol.btnbacks))
-            else
-              Column(
+            Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Show Route Plan on Map
@@ -1067,22 +876,6 @@ class _MapPageState extends State<MapPage> {
                     },
                     icon: const Icon(Icons.navigation_outlined),
                     label: const Text('Show Route Plan on Map'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppCol.btnbacks,
-                      side: BorderSide(color: AppCol.btnbacks),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Scan bin (POST /analyze/)
-                  OutlinedButton.icon(
-                    onPressed: () => _scanBin(bin),
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    label: const Text('Scan Bin with AI'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppCol.btnbacks,
                       side: BorderSide(color: AppCol.btnbacks),
@@ -1507,153 +1300,6 @@ class _MapPageState extends State<MapPage> {
                                     fontWeight: FontWeight.bold,
                                     color: AppCol.btnbacks),
                               ),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                    // Urgent bin alert banner (slides in below route banner)
-                    if (_urgentAlertBin != null)
-                      Positioned(
-                        top: MediaQuery.of(context).padding.top +
-                            (_activeRoute != null ? 72 : 8),
-                        left: 16,
-                        right: 16,
-                        child: Material(
-                          elevation: 6,
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade700,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.warning_amber_rounded,
-                                    color: Colors.white, size: 22),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Text(
-                                        'Urgent Pickup Needed!',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Bin ${_urgentAlertBin!.id.length > 14 ? '${_urgentAlertBin!.id.substring(0, 14)}â€¦' : _urgentAlertBin!.id} '
-                                        'is overflowing (${_urgentAlertBin!.fullness}%). '
-                                        'Ready to collect!',
-                                        style: const TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 11),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    // Re-route button â€” only shown when a route is already active
-                                    if (_activeRoute != null)
-                                      GestureDetector(
-                                        onTap: _reoptimizing ? null : () => _addBinToRoute(_urgentAlertBin!),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 4),
-                                          decoration: BoxDecoration(
-                                            color: Colors.amber.shade700,
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                          child: _reoptimizing
-                                              ? const SizedBox(
-                                                  width: 12,
-                                                  height: 12,
-                                                  child: CircularProgressIndicator(
-                                                      strokeWidth: 1.5,
-                                                      color: Colors.white),
-                                                )
-                                              : const Text(
-                                                  'Re-route',
-                                                  style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 12,
-                                                      fontWeight: FontWeight.bold),
-                                                ),
-                                        ),
-                                      ),
-                                    if (_activeRoute != null)
-                                      const SizedBox(height: 4),
-                                    // Navigate to bin on map
-                                    GestureDetector(
-                                      onTap: () {
-                                        final bin = _urgentAlertBin!;
-                                        setState(() => _urgentAlertBin = null);
-                                        _mapController?.animateCamera(
-                                          CameraUpdate.newCameraPosition(
-                                            CameraPosition(
-                                              target: LatLng(bin.lat, bin.lng),
-                                              zoom: 16,
-                                            ),
-                                          ),
-                                        );
-                                        _showBinDetails(bin);
-                                      },
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white.withValues(alpha: 0.2),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: const Text(
-                                          'View',
-                                          style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(width: 4),
-                                // Dismiss
-                                GestureDetector(
-                                  onTap: () =>
-                                      setState(() => _urgentAlertBin = null),
-                                  child: const Icon(Icons.close,
-                                      color: Colors.white70, size: 18),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-
-                    // Scanning overlay
-                    if (_scanning)
-                      Container(
-                        color: Colors.black54,
-                        child: const Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              CircularProgressIndicator(color: Colors.white),
-                              SizedBox(height: 16),
-                              Text('Scanning binâ€¦',
-                                  style: TextStyle(
-                                      color: Colors.white, fontSize: 16)),
                             ],
                           ),
                         ),
