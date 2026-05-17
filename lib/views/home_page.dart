@@ -475,6 +475,10 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Shift started'), backgroundColor: Colors.green),
       );
+      // Auto-generate the route the moment the worker clocks in — same call
+      // as the My Route button, just triggered automatically so the worker
+      // doesn't have to tap a second button to start their shift.
+      _autoGenerateRouteOnClockIn(uid);
     } else if (result?['error'] == 'already_clocked_in') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('You are already clocked in'), backgroundColor: Colors.orange),
@@ -493,6 +497,68 @@ class _HomePageState extends State<HomePage> {
           backgroundColor: Colors.orange.shade700,
         ),
       );
+    }
+  }
+
+  // Generates the worker's route silently after a successful clock-in.
+  // Mirrors the depot-resolution priority used in route_job_screen.dart:
+  // live GPS → last known GPS → worker's Firestore lat/lng. Failures are
+  // surfaced as a passive snackbar so the shift itself still starts cleanly
+  // even when no qualifying bins exist yet.
+  Future<void> _autoGenerateRouteOnClockIn(String uid) async {
+    double depotLat = 0.0, depotLng = 0.0;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      ).timeout(const Duration(seconds: 8));
+      if (!(pos.latitude == 0.0 && pos.longitude == 0.0)) {
+        depotLat = pos.latitude;
+        depotLng = pos.longitude;
+      }
+    } catch (_) {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null && !(last.latitude == 0.0 && last.longitude == 0.0)) {
+        depotLat = last.latitude;
+        depotLng = last.longitude;
+      }
+    }
+    if (depotLat == 0.0 && depotLng == 0.0) {
+      try {
+        final doc = await _db.collection('users').doc(uid).get();
+        final data = doc.data() ?? <String, dynamic>{};
+        depotLat = (data['lat'] as num?)?.toDouble() ?? 0.0;
+        depotLng = (data['lng'] as num?)?.toDouble() ?? 0.0;
+      } catch (_) {}
+    }
+    if (depotLat == 0.0 && depotLng == 0.0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Clocked in, but location unavailable — open My Route to retry.'),
+        backgroundColor: Colors.orange.shade700,
+        duration: const Duration(seconds: 4),
+      ));
+      return;
+    }
+
+    final routeResult = await _api.optimizeRoute(
+      workerId: uid,
+      depotLat: depotLat,
+      depotLng: depotLng,
+    );
+    if (!mounted) return;
+    if (routeResult != null && routeResult['success'] == true) {
+      final stops = (routeResult['route']?['totalStops'] ?? 0) as int;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Route ready — $stops stop${stops == 1 ? '' : 's'} in your area.'),
+        backgroundColor: Colors.green.shade700,
+        duration: const Duration(seconds: 4),
+      ));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Clocked in. No bins are critical right now — your route will appear when bins fill up.'),
+        backgroundColor: Colors.blueGrey.shade700,
+        duration: const Duration(seconds: 5),
+      ));
     }
   }
 

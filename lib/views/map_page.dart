@@ -60,6 +60,12 @@ class _MapPageState extends State<MapPage> {
   String _assignedArea = '';
   String _assignedWasteType = '';
 
+  // Live shift status — gates the My Route button. Worker can only open the
+  // route screen once they've clocked in (which itself requires a scheduled
+  // shift for today, enforced backend-side at /clock-in).
+  bool _isClockedIn = false;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _shiftStatusSub;
+
   // â”€â”€ Active route (live from Firestore 'routes' collection) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Urgent critical bins are auto-attached server-side by /analyze/ and surface
   // here as new stops in _subscribeToActiveRoute (passive toast, no banner).
@@ -105,6 +111,7 @@ class _MapPageState extends State<MapPage> {
     _bins = List.from(widget.binLocations);
     _setupMap();
     _subscribeToSettings();            // live warning/critical thresholds
+    _subscribeToShiftStatus();         // gates the My Route button
     _loadProfileThenSubscribeToBins(); // loads assignment filters first
     _subscribeToActiveRoute();
   }
@@ -115,8 +122,29 @@ class _MapPageState extends State<MapPage> {
     _routeSub?.cancel();
     _locationSub?.cancel();
     _settingsSub?.cancel();
+    _shiftStatusSub?.cancel();
     _mapController?.dispose();
     super.dispose();
+  }
+
+  // Live shift status from the user doc — flips _isClockedIn when the worker
+  // clocks in/out anywhere in the app. Backend writes shiftStatus
+  // ("clocked_in" / "clocked_out") on /clock-in and /clock-out so we just
+  // mirror it here.
+  void _subscribeToShiftStatus() {
+    if (_uid == null) return;
+    _shiftStatusSub = _db
+        .collection('users')
+        .doc(_uid)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted || !snap.exists) return;
+      final data = snap.data() ?? const <String, dynamic>{};
+      final clockedIn = data['shiftStatus'] == 'clocked_in';
+      if (clockedIn != _isClockedIn) {
+        setState(() => _isClockedIn = clockedIn);
+      }
+    });
   }
 
   // Live settings/main subscription — admin slider changes propagate here
@@ -1283,51 +1311,67 @@ class _MapPageState extends State<MapPage> {
                       ),
                     ),
 
-                    // My Route â€” opens RouteJobScreen
+                    // My Route â€” opens RouteJobScreen (gated by clock-in)
                     Positioned(
                       left: 16,
                       bottom: 250,
                       child: GestureDetector(
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const RouteJobScreen()),
-                        ),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).brightness == Brightness.dark ? AppCol.card : Colors.white,
-                            borderRadius: BorderRadius.circular(28),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.12),
-                                blurRadius: 10,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 30,
-                                height: 30,
-                                decoration: BoxDecoration(
-                                  gradient: AppCol.btncol,
-                                  borderRadius: BorderRadius.circular(10),
+                        onTap: _isClockedIn
+                            ? () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const RouteJobScreen()),
+                                )
+                            : () {
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                  content: const Text("Your Shift hasn't started yet"),
+                                  backgroundColor: Colors.orange.shade700,
+                                  duration: const Duration(seconds: 3),
+                                  behavior: SnackBarBehavior.floating,
+                                ));
+                              },
+                        child: Opacity(
+                          opacity: _isClockedIn ? 1.0 : 0.5,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).brightness == Brightness.dark ? AppCol.card : Colors.white,
+                              borderRadius: BorderRadius.circular(28),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.12),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
                                 ),
-                                child: const Icon(Icons.route_rounded, color: Colors.white, size: 16),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'My Route',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: Theme.of(context).brightness == Brightness.dark ? Colors.white : AppCol.btntext,
-                                  letterSpacing: -0.2,
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 30,
+                                  height: 30,
+                                  decoration: BoxDecoration(
+                                    gradient: AppCol.btncol,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Icon(
+                                    _isClockedIn ? Icons.route_rounded : Icons.lock_outline,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 8),
+                                Text(
+                                  'My Route',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: Theme.of(context).brightness == Brightness.dark ? Colors.white : AppCol.btntext,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
