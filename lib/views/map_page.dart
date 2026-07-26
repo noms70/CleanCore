@@ -918,7 +918,8 @@ class _MapPageState extends State<MapPage> {
             _detailRow('Fill Level', '${bin.fullness}%'),
             const SizedBox(height: 10),
 
-            // Fill progress bar
+            // Fill progress bar — uses live critical threshold so the bar
+            // turns red the moment the admin lowers the slider past the bin.
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: LinearProgressIndicator(
@@ -926,7 +927,7 @@ class _MapPageState extends State<MapPage> {
                 minHeight: 8,
                 backgroundColor: AppCol.btnbacks.withValues(alpha: 0.2),
                 valueColor: AlwaysStoppedAnimation<Color>(
-                  bin.isCritical ? Colors.red : AppCol.btnbacks,
+                  _isCriticalNow(bin) ? Colors.red : AppCol.btnbacks,
                 ),
               ),
             ),
@@ -1091,11 +1092,13 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
+  // Status text mirrors the marker-colour rule so the bin-details modal
+  // never disagrees with the live map. Uses the same _warningThreshold /
+  // _criticalThreshold maintained by _subscribeToSettings.
   String _getStatusText(int fullness) {
-    if (fullness <= 30) return 'EMPTY';
-    if (fullness <= 70) return 'NORMAL';
-    if (fullness < 90) return 'FULL';
-    return 'OVERFLOW';
+    if (fullness >= _criticalThreshold) return 'CRITICAL';
+    if (fullness >= _warningThreshold)  return 'WARNING';
+    return 'NORMAL';
   }
 
   void _focusOnRoute() {
@@ -1113,27 +1116,29 @@ class _MapPageState extends State<MapPage> {
 
   Widget _buildBinTile(BinLocation bin) {
     final isSelected = _selectedBin?.id == bin.id;
-    // Determine status label & color based on fill level
+    // Determine status label & color based on live admin thresholds so the
+    // tile chip stays in lockstep with the marker colour and the route-card
+    // colour. _isCriticalNow already honours the live critical threshold.
+    final bool tileIsCritical = _isCriticalNow(bin);
+    final bool tileIsWarning  = !tileIsCritical && bin.fullness >= _warningThreshold;
     final String statusLabel;
     final Color statusColor;
-    if (bin.fullness >= 90) {
+    if (tileIsCritical) {
       statusLabel = 'CRITICAL';
       statusColor = Colors.red;
-    } else if (bin.fullness > 70) {
-      statusLabel = 'HIGH';
+    } else if (tileIsWarning) {
+      statusLabel = 'WARNING';
       statusColor = Colors.orange;
-    } else if (bin.fullness > 30) {
+    } else {
       statusLabel = 'NORMAL';
       statusColor = Colors.green;
-    } else {
-      statusLabel = 'LOW';
-      statusColor = const Color(0xFF0BBFC9);
     }
 
-    // Gradient for the accent strip at top
-    final List<Color> accentGradient = bin.isCritical
+    // Gradient for the accent strip at top — uses the same live-threshold
+    // categories as the status chip above.
+    final List<Color> accentGradient = tileIsCritical
         ? [Colors.red.shade400, Colors.red.shade700]
-        : bin.fullness > 70
+        : tileIsWarning
             ? [Colors.orange.shade300, Colors.orange.shade600]
             : [const Color(0xFF0BBFC9), const Color(0xFF048A7E)];
 
@@ -1161,13 +1166,13 @@ class _MapPageState extends State<MapPage> {
           ),
           boxShadow: [
             BoxShadow(
-              color: (bin.isCritical
+              color: (tileIsCritical
                       ? Colors.red
                       : isSelected
                           ? AppCol.btnbacks
                           : Colors.black)
-                  .withValues(alpha: bin.isCritical ? 0.18 : 0.08),
-              blurRadius: bin.isCritical ? 12 : 8,
+                  .withValues(alpha: tileIsCritical ? 0.18 : 0.08),
+              blurRadius: tileIsCritical ? 12 : 8,
               offset: const Offset(0, 4),
             ),
           ],

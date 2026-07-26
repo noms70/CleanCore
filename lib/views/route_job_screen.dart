@@ -54,12 +54,21 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
   StreamSubscription<QuerySnapshot>? _routeSub;
   StreamSubscription<QuerySnapshot>? _completedRouteSub;
   StreamSubscription<QuerySnapshot>? _orphanBinsSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _settingsSub;
+
+  // Live thresholds from settings/main — mirrors the listener in map_page.dart
+  // so stop cards classify fill levels against the same admin-configured
+  // boundaries that the map markers use. Defaults match the backend's
+  // _get_thresholds() fallback (70/90) until the first snapshot arrives.
+  int _warningThreshold  = 70;
+  int _criticalThreshold = 90;
 
   @override
   void initState() {
     super.initState();
     _subscribeToRoute();
     _subscribeToCompletedRoute();
+    _subscribeToSettings();
     _loadAssignedAreaThenSubscribeOrphans();
   }
 
@@ -68,7 +77,30 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
     _routeSub?.cancel();
     _completedRouteSub?.cancel();
     _orphanBinsSub?.cancel();
+    _settingsSub?.cancel();
     super.dispose();
+  }
+
+  // Live settings/main subscription — admin slider changes propagate here
+  // within ~50 ms and trigger a card re-color so the worker sees the new
+  // severity without waiting for the next route doc update.
+  void _subscribeToSettings() {
+    _settingsSub = _db
+        .collection('settings')
+        .doc('main')
+        .snapshots()
+        .listen((snap) {
+      if (!mounted || !snap.exists) return;
+      final data = snap.data() ?? const <String, dynamic>{};
+      final newWarning  = (data['warningThreshold']  as num?)?.toInt() ?? 70;
+      final newCritical = (data['criticalThreshold'] as num?)?.toInt() ?? 90;
+      if (newWarning != _warningThreshold || newCritical != _criticalThreshold) {
+        setState(() {
+          _warningThreshold  = newWarning;
+          _criticalThreshold = newCritical;
+        });
+      }
+    });
   }
 
   // ── Orphan critical bins (area-filtered) ──────────────────────────────────
@@ -986,9 +1018,12 @@ class _RouteJobScreenState extends State<RouteJobScreen> {
     final isBusy      = _busyBins.contains(stop.binId);
     final isSkipping  = _skippingBins.contains(stop.binId);
     final isSkipped   = stop.skipped;
-    final fillColor = stop.fillLevel >= 90
+    // Severity uses live thresholds (settings/main via _subscribeToSettings)
+    // so card colour stays in lockstep with the map markers when admin
+    // changes the warning/critical sliders.
+    final fillColor = stop.fillLevel >= _criticalThreshold
         ? Colors.red
-        : stop.fillLevel >= 70
+        : stop.fillLevel >= _warningThreshold
             ? Colors.orange
             : Colors.green;
 
