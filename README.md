@@ -81,16 +81,3 @@ flutter run
 ```
 
 ---
-
-## Notes on this repository
-
-- Datasets, virtual environments, `node_modules/`, and build output are excluded
-  via [`.gitignore`](.gitignore). Stock pretrained YOLO checkpoints
-  (`yolov8s.pt`, `yolo26n.pt`) are also excluded — they are public upstream
-  weights, not project source. The **trained** models are committed.
-- Prior to consolidation, the three components lived in separate repositories.
-  The mobile app's full commit history is preserved here; the backend and admin
-  panel were imported at their current state. Their original histories remain at
-  `Ayesha-Nadeem08/Backend` and `Ayesha-Nadeem08/Admin_Panel`, and the pre-merge
-  state of this repository is tagged `archive/main-pre-monorepo`.
-- Reference material and dataset attribution: [`REFERENCES.md`](REFERENCES.md).
