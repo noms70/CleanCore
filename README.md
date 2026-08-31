@@ -4,8 +4,8 @@ AI-driven waste monitoring and worker-level route optimization.
 
 **Team:** Ayesha Noman & Ayesha Nadeem
 **Supervisor:** Ms Maha Rasheed
-**University:** COMSATS University Islamabad — Department of Computer Science
-**Industry Partner:** SmartEnds
+**University:** COMSATS University Islamabad - Department of Computer Science
+**Industry Partner:** SmartEnds Pvt Ltd
 
 ---
 
@@ -20,7 +20,6 @@ This is a monorepo containing all three components of the CleanCore system.
 | [`CleanCore/`](CleanCore/) | Worker mobile app | Flutter / Dart |
 | [`Docs/`](Docs/) | Report, addendum, brochure, demo video | — |
 
-Firestore is the single source of truth shared by all three components.
 
 ---
 
@@ -38,16 +37,14 @@ IoT camera ──► POST /analyze/ ──► YOLOv8 (fill + waste) ──► Fi
                               Greedy NN + 2-opt over Haversine
 ```
 
-The backend orders stops by **Haversine** distance; the Flutter app draws the
-path along **OSRM road polylines**. These serve different purposes — ordering
-versus display — and are not in conflict.
+
 
 ---
 
 ## Scope
 
 CleanCore is deliberately the **micro-level (worker-level)** optimization layer.
-Macro-level fleet management — truck capacities, multi-vehicle dispatch — is
+Macro-level fleet management like truck capacities, multi-vehicle dispatch, is
 intentionally out of scope, as that layer is owned by commercial providers in
 real European deployments. See §1 of the Final Addendum in [`Docs/`](Docs/).
 
@@ -62,9 +59,6 @@ python -m venv venv && venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
-Requires a `serviceAccountKey.json` (Firebase service account) in `Backend/`.
-**This file is intentionally not committed** — obtain it from the Firebase
-console. Trained weights ship in [`Backend/models/`](Backend/models/).
 
 ### Admin panel
 ```bash
