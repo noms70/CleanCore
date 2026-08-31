@@ -1,0 +1,9 @@
+serviceAccountKey.json
+# Track our trained model weights, ignore everything else in models/.
+# (Must be `models/*` not `models/` — git won't descend into an excluded
+# directory, so a negation under `models/` would never be evaluated.)
+models/*
+!models/*.pt
+venv/
+runs/
+__pycache__/

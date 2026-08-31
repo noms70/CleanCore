@@ -1,0 +1,217 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Clean Core Design System
+  Brand palette derived from the mobile app:
+    – Primary teal  : hsl(184, 86%, 42%)   ≈ #0BBFC9  (app bottom nav / header bar)
+    – Accent teal   : hsl(181, 100%, 40%)  ≈ #00CCCC  (highlights, gradients)
+    – Dark navy bg  : hsl(228, 55%, 8%)    ≈ #080E26  (splash-screen deep dark)
+    – Card navy     : hsl(228, 42%, 13%)   ≈ #111A35  (greeting card in app)
+  All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* ── Backgrounds ─────────────────────────────── */
+    --background:  228 55% 8%;          /* deep navy, matches app splash dark zone */
+    --foreground:  186 15% 96%;         /* near-white with a teal tint             */
+
+    /* ── Cards & Surfaces ────────────────────────── */
+    --card:        228 42% 13%;         /* dark-navy card                          */
+    --card-foreground: 186 15% 96%;
+
+    --popover:     228 48% 10%;
+    --popover-foreground: 186 15% 96%;
+
+    /* ── Brand Teal ──────────────────────────────── */
+    --primary:     184 86% 42%;         /* Clean Core teal  #0BBFC9               */
+    --primary-foreground: 228 55% 8%;   /* dark navy text on teal buttons          */
+
+    /* ── Secondary ───────────────────────────────── */
+    --secondary:   228 38% 18%;
+    --secondary-foreground: 186 15% 96%;
+
+    /* ── Muted ───────────────────────────────────── */
+    --muted:       228 32% 20%;
+    --muted-foreground: 220 12% 62%;
+
+    /* ── Accent (brighter teal for glows/highlights) */
+    --accent:      181 100% 44%;        /* #00E0E0 – brighter teal highlight       */
+    --accent-foreground: 228 55% 8%;
+
+    /* ── Semantic ────────────────────────────────── */
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success:     152 76% 46%;
+    --success-foreground: 0 0% 100%;
+
+    --warning:     38 92% 55%;
+    --warning-foreground: 0 0% 100%;
+
+    --info:        184 86% 42%;
+    --info-foreground: 228 55% 8%;
+
+    /* ── Form / Ring ─────────────────────────────── */
+    --border:      228 26% 20%;
+    --input:       228 32% 16%;
+    --ring:        184 86% 42%;
+
+    --radius: 0.75rem;
+
+    /* ── Sidebar ─────────────────────────────────── */
+    --sidebar-background:         228 58% 7%;
+    --sidebar-foreground:         186 15% 93%;
+    --sidebar-primary:            184 86% 42%;
+    --sidebar-primary-foreground: 228 55% 8%;
+    --sidebar-accent:             228 44% 14%;
+    --sidebar-accent-foreground:  181 100% 60%;
+    --sidebar-border:             228 30% 15%;
+    --sidebar-ring:               184 86% 42%;
+  }
+
+  /* Light mode override — toggled via html.light class */
+}
+
+html.light {
+  --background:  210 30% 96%;
+  --foreground:  228 50% 12%;
+  --card:        0 0% 100%;
+  --card-foreground: 228 50% 12%;
+  --popover:     0 0% 100%;
+  --popover-foreground: 228 50% 12%;
+  --primary:     184 86% 36%;
+  --primary-foreground: 0 0% 100%;
+  --secondary:   210 25% 90%;
+  --secondary-foreground: 228 50% 12%;
+  --muted:       210 20% 92%;
+  --muted-foreground: 220 10% 42%;
+  --accent:      181 70% 36%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --success:     152 76% 38%;
+  --success-foreground: 0 0% 100%;
+  --warning:     38 92% 44%;
+  --warning-foreground: 0 0% 100%;
+  --info:        184 86% 36%;
+  --info-foreground: 0 0% 100%;
+  --border:      210 18% 82%;
+  --input:       210 20% 90%;
+  --ring:        184 86% 42%;
+  /* Sidebar stays dark even in light mode */
+  --sidebar-background:         228 58% 10%;
+  --sidebar-foreground:         186 15% 93%;
+  --sidebar-primary:            184 86% 42%;
+  --sidebar-primary-foreground: 228 55% 8%;
+  --sidebar-accent:             228 44% 14%;
+  --sidebar-accent-foreground:  181 100% 60%;
+  --sidebar-border:             228 30% 15%;
+  --sidebar-ring:               184 86% 42%;
+}
+
+html.light body {
+  background: hsl(210, 30%, 96%);
+  background-attachment: fixed;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    /* Deep navy gradient with a very subtle teal centre glow — mirrors the app splash */
+    background: linear-gradient(
+      135deg,
+      hsl(228, 55%, 8%)  0%,
+      hsl(222, 58%, 10%) 30%,
+      hsl(210, 62%, 11%) 50%,
+      hsl(222, 58%, 10%) 70%,
+      hsl(228, 55%, 8%)  100%
+    );
+    background-attachment: fixed;
+  }
+}
+
+/* ── Component Utilities ────────────────────────────────────────────────── */
+@layer components {
+
+  /* Glassmorphism card */
+  .glass-card {
+    background: linear-gradient(
+      135deg,
+      hsl(228, 42%, 13%) 0%,
+      hsl(222, 44%, 15%) 100%
+    );
+    backdrop-filter: blur(12px);
+    border: 1px solid hsl(184, 40%, 24%);
+    box-shadow:
+      0 8px 32px 0 rgba(11, 191, 201, 0.1),
+      0 0 0 1px rgba(0, 224, 224, 0.12);
+  }
+
+  /* Brand teal gradient text */
+  .gradient-text {
+    background: linear-gradient(
+      135deg,
+      hsl(181, 100%, 52%) 0%,
+      hsl(184, 86%, 46%) 50%,
+      hsl(176, 80%, 55%) 100%
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Teal glow */
+  .teal-glow {
+    box-shadow:
+      0 0 20px rgba(11, 191, 201, 0.45),
+      0 0 40px rgba(0, 224, 224, 0.20);
+  }
+
+  /* Full brand gradient background (button / badge fills) */
+  .gradient-bg {
+    background: linear-gradient(
+      135deg,
+      hsl(181, 100%, 44%) 0%,
+      hsl(184, 86%, 42%) 50%,
+      hsl(190, 80%, 40%) 100%
+    );
+  }
+
+  /* Lift + teal glow on hover */
+  .hover-glow {
+    transition: all 0.3s ease;
+  }
+  .hover-glow:hover {
+    box-shadow:
+      0 0 20px rgba(11, 191, 201, 0.5),
+      0 0 40px rgba(0, 224, 224, 0.3),
+      0 0 60px rgba(11, 191, 201, 0.15);
+    transform: translateY(-2px);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar            { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track      { background: hsl(228, 55%, 8%); }
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+      135deg,
+      hsl(181, 100%, 44%) 0%,
+      hsl(184, 86%, 42%) 100%
+    );
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+      135deg,
+      hsl(181, 100%, 52%) 0%,
+      hsl(184, 86%, 50%) 100%
+    );
+  }
+}

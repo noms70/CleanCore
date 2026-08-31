@@ -1,45 +1,49 @@
-# Miscellaneous
-*.class
+# ─── Secrets — never commit ────────────────────────────────
+**/serviceAccountKey.json
+**/*serviceAccount*.json
+**/.env
+**/.env.*
+!**/.env.example
+
+# ─── Python / Backend ──────────────────────────────────────
+**/venv/
+**/.venv/
+venvmodel/
+**/__pycache__/
+*.py[cod]
+Backend/runs/
+
+# ─── Node / Admin panel ────────────────────────────────────
+**/node_modules/
+Admin_Panel/build/
+Admin_Panel/dist/
+**/*.tsbuildinfo
+**/.firebase/
 *.log
-*.pyc
+
+# ─── Flutter / mobile app ──────────────────────────────────
+# NOTE: anchored to CleanCore/ because this repo is now rooted
+# one level above the Flutter project.
+CleanCore/build/
+CleanCore/.dart_tool/
+CleanCore/.flutter-plugins-dependencies
+CleanCore/android/app/debug/
+CleanCore/android/app/profile/
+CleanCore/android/app/release/
+
+# ─── Datasets & stock pretrained weights (not our source) ──
+# Our *trained* models live in Backend/models/ and ARE tracked.
+Datasets/
+Datasets_v2/
+industrial_dataset/
+/yolov8s.pt
+/yolo26n.pt
+/*.zip
+
+# ─── Editors / OS ──────────────────────────────────────────
+**/*.iml
+.idea/
+.history
 *.swp
 .DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
-
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-/coverage/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+Thumbs.db
