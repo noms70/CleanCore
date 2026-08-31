@@ -2,10 +2,10 @@
 
 AI-driven waste monitoring and worker-level route optimization.
 
-**Team:** Ayesha Noman & Ayesha Nadeem
-**Supervisor:** Ms Maha Rasheed
-**University:** COMSATS University Islamabad - Department of Computer Science
-**Industry Partner:** SmartEnds Pvt Ltd
+**Team:** Ayesha Noman & Ayesha Nadeem.
+**Supervisor:** Ms Maha Rasheed.
+**University:** COMSATS University Islamabad - Department of Computer Science.
+**Industry Partner:** SmartEnds Pvt Ltd.
 
 ---
 
